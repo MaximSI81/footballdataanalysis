@@ -1,0 +1,6 @@
+.env
+test.ipynb
+myenv/
+logs/
+__pycache__/
+config/
