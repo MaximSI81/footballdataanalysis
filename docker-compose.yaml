@@ -108,7 +108,7 @@ services:
   clickhouse-server:
     image: clickhouse/clickhouse-server
     environment:
-      CLICKHOUSE_DB: footboll_db
+      CLICKHOUSE_DB: football_db
       CLICKHOUSE_PASSWORD: password
       CLICKHOUSE_USER: username
     ports:
