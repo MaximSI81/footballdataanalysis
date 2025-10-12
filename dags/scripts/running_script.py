@@ -60,9 +60,9 @@ class FootballDataOrchestrator:
         except Exception as e:
             print(f"❌ Ошибка вставки карточек: {e}")
     
-    async def process_round_with_cards(self, round_number: int):
+    async def process_round(self, round_number: int):
         """Обрабатывает тур с полным сбором данных (статистика + карточки)"""
-        print(f"🎯 Запуск расширенного сбора данных для тура {round_number}")
+        print(f"🎯 Запуск сбора данных для тура {round_number}")
         
         async with FootballDataCollector() as collector:
             # Используем новый метод для сбора полных данных
@@ -94,64 +94,12 @@ class FootballDataOrchestrator:
                     self._insert_player_stats(player_stats)
                     print(f"💾 Сохранено {len(player_stats)} записей статистики")
                 
-                # Логируем карточки
-                for incident in incidents:
-                    print(f"🟨 Карточка: {incident['player_name']} - {incident['card_type']}")
+                # Сохраняем карточки
+                if incidents:
+                    self._insert_cards(incidents)
+                    print(f"🟨 Сохранено {len(incidents)} карточек")
             
             print(f"🎉 Тур {round_number} обработан: {total_players} игроков, {total_cards} карточек")
-    
-    async def process_round(self, round_number: int):
-        """Обрабатывает данные тура и загружает в ClickHouse"""
-        async with FootballDataCollector() as collector:
-            # 1. Получаем матчи тура
-            matches = await collector.get_round_matches(
-                self.tournament_id, self.season_id, round_number
-            )
-            print(f"🔍 Получено матчей: {len(matches)}")
-            if not matches:
-                print(f"❌ В туре {round_number} нет матчей")
-                return
-            
-            # 2. Загружаем матчи в ClickHouse
-            self._insert_matches(matches)
-            print(f"✅ Загружено {len(matches)} матчей тура {round_number}")
-            
-            # 3. Для каждого матча получаем данные
-            total_player_stats = 0
-            total_cards = 0
-            
-            for match in matches:
-                match_id = match['match_id']
-                print(f"🔍 Обрабатываем матч {match_id}...")
-                
-                # Пауза между запросами
-                await asyncio.sleep(1)
-                
-                try:
-                    # Получаем инциденты (карточки) отдельно
-                    incidents = await collector.get_match_incidents(match_id)
-                    card_incidents = [inc for inc in incidents if inc.get('card_type') in ['yellow', 'red', 'yellowRed']]
-                    
-                    # Сохраняем карточки в отдельную таблицу
-                    if card_incidents:
-                        self._insert_cards(card_incidents)
-                        total_cards += len(card_incidents)
-                        print(f"   🟨 Сохранено {len(card_incidents)} карточек")
-                    
-                    # Получаем статистику игроков отдельно
-                    player_stats = await collector.get_player_statistics(match_id)
-                    if player_stats:
-                        self._insert_player_stats(player_stats)
-                        total_player_stats += len(player_stats)
-                        print(f"   ✅ Статистика {len(player_stats)} игроков загружена")
-                    else:
-                        print(f"   ❌ Нет статистики для матча {match_id}")
-                        
-                except Exception as e:
-                    print(f"   ❌ Ошибка обработки матча {match_id}: {e}")
-                    continue
-            
-            print(f"🎯 Тур {round_number} обработан: {total_player_stats} записей статистики, {total_cards} карточек")
 
     def _insert_matches(self, matches: List[Dict[str, Any]]):
         """Вставляет данные матчей в ClickHouse"""
@@ -198,7 +146,7 @@ class FootballDataOrchestrator:
                 successful_dribbles, dribble_success, total_tackle, interception_won,
                 total_clearance, outfielder_block, challenge_lost, duel_won, duel_lost,
                 aerial_won, duel_success, touches, possession_lost_ctrl, was_fouled,
-                fouls, yellow_cards, red_cards, saves, punches, good_high_claim,
+                fouls, saves, punches, good_high_claim,
                 saved_shots_from_inside_box, created_at
             ) VALUES
             """
@@ -262,14 +210,11 @@ class FootballDataOrchestrator:
                         int(stats.get('possession_lost_ctrl', 0)),
                         int(stats.get('was_fouled', 0)),
                         int(stats.get('fouls', 0)),
-                        int(stats.get('yellow_cards', 0)),
-                        int(stats.get('red_cards', 0)),
                         int(stats.get('saves', 0)),
                         int(stats.get('punches', 0)),
                         int(stats.get('good_high_claim', 0)),
                         int(stats.get('saved_shots_from_inside_box', 0)),
                         datetime.now()  # created_at
-                        # partition_key УБРАН - он вычисляется автоматически из team_id
                     ))
                 except Exception as e:
                     print(f"  ❌ Ошибка подготовки записи {i}: {e}")
@@ -289,6 +234,7 @@ class FootballDataOrchestrator:
             import traceback
             traceback.print_exc()
             raise
+
 async def main():
     parser = argparse.ArgumentParser(description='Football Data Orchestrator')
     parser.add_argument('--round', type=int, required=True, help='Round number to process')
@@ -299,7 +245,6 @@ async def main():
     parser.add_argument('--password', default=os.getenv('CLICKHOUSE_PASSWORD', ''), help='ClickHouse password')
     parser.add_argument('--database', default=os.getenv('CLICKHOUSE_DB', 'footboll_db'), help='ClickHouse database name')
     parser.add_argument('--port', type=int, default=os.getenv('CLICKHOUSE_PORT', 9000), help='ClickHouse port')
-    parser.add_argument('--with-cards', action='store_true', help='Собирать данные с карточками')
         
     args = parser.parse_args()
         
@@ -316,13 +261,7 @@ async def main():
     )
         
     try:
-        if args.with_cards:
-            # Используем новый метод с карточками
-            await orchestrator.process_round_with_cards(args.round)
-        else:
-            # Используем старый метод
-            await orchestrator.process_round(args.round)
-                
+        await orchestrator.process_round(args.round)
         print(f"✅ Тур {args.round} успешно обработан!")
     except Exception as e:
         print(f"❌ Ошибка обработки тура {args.round}: {e}")
