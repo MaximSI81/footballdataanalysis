@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class FootballDataOrchestrator:
-    def __init__(self, ch_host: str, ch_user: str, ch_password: str, tournament_id: int, season_id: int, ch_database: str = 'footboll_db'):
+    def __init__(self, ch_host: str, ch_user: str, ch_password: str, tournament_id: int, season_id: int, ch_database: str = 'football_db'):
         self.ch_client = Client(
             host=ch_host,
             user=ch_user,
@@ -22,6 +22,127 @@ class FootballDataOrchestrator:
         self.tournament_id = tournament_id 
         self.season_id = season_id 
 
+    def _insert_matches(self, matches: List[Dict[str, Any]]):
+        """Вставляет данные матчей в ClickHouse"""
+        try:
+            if not matches:
+                print("❌ Нет данных матчей для вставки")
+                return
+                
+            print(f"🔍 Подготовка {len(matches)} матчей для вставки...")
+            
+            query = """
+            INSERT INTO football_matches (
+                match_id, tournament_id, season_id, round_number, match_date,
+                home_team_id, home_team_name, away_team_id, away_team_name,
+                home_score, away_score, status, venue, start_timestamp, created_at
+            ) VALUES
+            """
+            
+            data = []
+            for match in matches:
+                data.append((
+                    int(match['match_id']),
+                    int(match['tournament_id']),
+                    int(match['season_id']),
+                    int(match['round_number']),
+                    match['match_date'],
+                    int(match['home_team_id']),
+                    match['home_team_name'],
+                    int(match['away_team_id']),
+                    match['away_team_name'],
+                    int(match['home_score']),
+                    int(match['away_score']),
+                    match['status'],
+                    match['venue'],
+                    match['start_timestamp'],
+                    datetime.now()  # created_at
+                ))
+            
+            self.ch_client.execute(query, data)
+            print(f"✅ Успешно вставлено {len(data)} матчей")
+            
+        except Exception as e:
+            print(f"❌ Ошибка вставки матчей: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _insert_match_stats(self, match_stats: List[Dict[str, Any]]):
+        """Вставляет статистику матча в ClickHouse"""
+        try:
+            if not match_stats:
+                print("❌ Нет данных статистики матча для вставки")
+                return
+                
+            print(f"📊 Подготовка {len(match_stats)} записей статистики матча...")
+            
+            query = """
+            INSERT INTO football_match_stats (
+                match_id, team_id, team_name, team_type,
+                ball_possession, expected_goals, total_shots, shots_on_target, 
+                shots_off_target, blocked_shots, corners, free_kicks, fouls, yellow_cards,
+                big_chances, big_chances_scored, big_chances_missed, 
+                shots_inside_box, shots_outside_box, touches_in_penalty_area,
+                total_passes, accurate_passes, pass_accuracy, total_crosses, accurate_crosses,
+                total_long_balls, accurate_long_balls, tackles, tackles_won_percent, interceptions,
+                recoveries, clearances, created_at
+            ) VALUES
+            """
+            
+            data = []
+            for stats in match_stats:
+                try:
+                    data.append((
+                        int(stats['match_id']),
+                        int(stats['team_id']),
+                        stats['team_name'],
+                        stats['team_type'],
+                        float(stats.get('ball_possession', 0)),
+                        float(stats.get('expected_goals', 0)),
+                        int(stats.get('total_shots', 0)),
+                        int(stats.get('shots_on_target', 0)),
+                        int(stats.get('shots_off_target', 0)),
+                        int(stats.get('blocked_shots', 0)),
+                        int(stats.get('corners', 0)),
+                        int(stats.get('free_kicks', 0)),
+                        int(stats.get('fouls', 0)),
+                        int(stats.get('yellow_cards', 0)),
+                        int(stats.get('big_chances', 0)),
+                        int(stats.get('big_chances_scored', 0)),
+                        int(stats.get('big_chances_missed', 0)),
+                        int(stats.get('shots_inside_box', 0)),
+                        int(stats.get('shots_outside_box', 0)),
+                        int(stats.get('touches_in_penalty_area', 0)),
+                        int(stats.get('total_passes', 0)),
+                        int(stats.get('accurate_passes', 0)),
+                        float(stats.get('pass_accuracy', 0)),
+                        int(stats.get('total_crosses', 0)),
+                        int(stats.get('accurate_crosses', 0)),
+                        int(stats.get('total_long_balls', 0)),
+                        int(stats.get('accurate_long_balls', 0)),
+                        int(stats.get('tackles', 0)),
+                        int(stats.get('tackles_won_percent', 0)),
+                        int(stats.get('interceptions', 0)),
+                        int(stats.get('recoveries', 0)),
+                        int(stats.get('clearances', 0)),
+                        stats['created_at']
+                    ))
+                except Exception as e:
+                    print(f"  ❌ Ошибка подготовки статистики: {e}")
+                    continue
+            
+            if not data:
+                print("❌ Нет данных для вставки статистики")
+                return
+                
+            self.ch_client.execute(query, data)
+            print(f"✅ Успешно вставлено {len(data)} записей статистики матча")
+            
+        except Exception as e:
+            print(f"❌ Ошибка вставки статистики матча: {e}")
+            import traceback
+            traceback.print_exc()
+            
     def _insert_cards(self, incidents: List[Dict[str, Any]]):
         """Вставляет данные о карточках в отдельную таблицу ClickHouse"""
         try:
@@ -61,11 +182,10 @@ class FootballDataOrchestrator:
             print(f"❌ Ошибка вставки карточек: {e}")
     
     async def process_round(self, round_number: int):
-        """Обрабатывает тур с полным сбором данных (статистика + карточки)"""
+        """Обрабатывает тур с полным сбором данных"""
         print(f"🎯 Запуск сбора данных для тура {round_number}")
         
         async with FootballDataCollector() as collector:
-            # Используем новый метод для сбора полных данных
             round_data = await collector.collect_round_data(
                 tournament_id=self.tournament_id,
                 season_id=self.season_id, 
@@ -78,60 +198,39 @@ class FootballDataOrchestrator:
             
             total_players = 0
             total_cards = 0
+            total_match_stats = 0
             
             for match_data in round_data['matches']:
                 match_info = match_data['match_info']
                 player_stats = match_data['player_stats']
                 incidents = match_data['incidents']
+                match_stats = match_data['match_stats']
                 
                 total_players += len(player_stats)
                 total_cards += len(incidents)
+                total_match_stats += len(match_stats)
                 
-                print(f"📊 Матч {match_info['match_id']}: {len(player_stats)} игроков, {len(incidents)} карточек")
+                print(f"📊 Матч {match_info['match_id']}: {len(player_stats)} игроков, {len(incidents)} карточек, {len(match_stats)} записей статистики")
                 
-                # Сохраняем статистику игроков в ClickHouse
+                # Сохраняем данные в ClickHouse
                 if player_stats:
                     self._insert_player_stats(player_stats)
-                    print(f"💾 Сохранено {len(player_stats)} записей статистики")
+                    print(f"💾 Сохранено {len(player_stats)} записей статистики игроков")
                 
-                # Сохраняем карточки
                 if incidents:
                     self._insert_cards(incidents)
                     print(f"🟨 Сохранено {len(incidents)} карточек")
+                
+                if match_stats:
+                    self._insert_match_stats(match_stats)
+                    print(f"📈 Сохранено {len(match_stats)} записей статистики матча")
+                
+                # Вставляем матчи (если еще не вставлены)
+                self._insert_matches([match_info])
+                print(f"🏟️  Сохранен матч {match_info['match_id']}")
             
-            print(f"🎉 Тур {round_number} обработан: {total_players} игроков, {total_cards} карточек")
+            print(f"🎉 Тур {round_number} обработан: {total_players} игроков, {total_cards} карточек, {total_match_stats} записей статистики")
 
-    def _insert_matches(self, matches: List[Dict[str, Any]]):
-        """Вставляет данные матчей в ClickHouse"""
-        query = """
-        INSERT INTO football_matches (
-            match_id, tournament_id, season_id, round_number, match_date,
-            home_team_id, home_team_name, away_team_id, away_team_name,
-            home_score, away_score, status, venue, start_timestamp
-        ) VALUES
-        """
-        
-        data = []
-        for match in matches:
-            data.append((
-                match['match_id'],
-                match['tournament_id'],
-                match['season_id'],
-                match['round_number'],
-                match['match_date'],
-                match['home_team_id'],
-                match['home_team_name'],
-                match['away_team_id'],
-                match['away_team_name'],
-                match['home_score'],
-                match['away_score'],
-                match['status'],
-                match['venue'],
-                match['start_timestamp']
-            ))
-        
-        self.ch_client.execute(query, data)
-    
     def _insert_player_stats(self, player_stats: List[Dict[str, Any]]):
         """Вставляет статистику игроков в ClickHouse"""
         try:
@@ -235,6 +334,47 @@ class FootballDataOrchestrator:
             traceback.print_exc()
             raise
 
+# ДОБАВЬТЕ ЭТУ ФУНКЦИЮ ДЛЯ ПРОВЕРКИ ДАННЫХ
+def check_database_state(host, user, password, database):
+    """Проверяет состояние базы данных"""
+    ch_client = Client(
+        host=host,
+        user=user,
+        password=password,
+        database=database
+    )
+    
+    try:
+        # Проверяем матчи
+        matches_count = ch_client.execute("SELECT COUNT(*) FROM football_matches")[0][0]
+        print(f"📊 Матчей в базе: {matches_count}")
+        
+        # Проверяем статистику игроков
+        stats_count = ch_client.execute("SELECT COUNT(*) FROM football_player_stats")[0][0]
+        print(f"👥 Записей статистики: {stats_count}")
+        
+        # Проверяем карточки
+        cards_count = ch_client.execute("SELECT COUNT(*) FROM football_cards")[0][0]
+        print(f"🟨 Карточек в базе: {cards_count}")
+        
+        # Показываем примеры матчей
+        if matches_count > 0:
+            sample_matches = ch_client.execute("""
+                SELECT match_id, home_team_name, away_team_name, home_score, away_score 
+                FROM football_matches 
+                ORDER BY match_date DESC 
+                LIMIT 5
+            """)
+            print("\n📅 Последние матчи в базе:")
+            for match in sample_matches:
+                print(f"   {match[0]}: {match[1]} {match[3]}-{match[4]} {match[2]}")
+        
+        return matches_count > 0
+        
+    except Exception as e:
+        print(f"❌ Ошибка проверки базы данных: {e}")
+        return False
+
 async def main():
     parser = argparse.ArgumentParser(description='Football Data Orchestrator')
     parser.add_argument('--round', type=int, required=True, help='Round number to process')
@@ -250,6 +390,15 @@ async def main():
         
     print(f"🚀 Запуск обработки тура {args.round} в {datetime.now()}")
     print(f"📊 Подключение к БД: {args.host}:{args.port}/{args.database}")
+    
+    # Сначала проверяем состояние базы
+    print("\n🔍 Проверяем текущее состояние базы данных...")
+    has_data = check_database_state(args.host, args.user, args.password, args.database)
+    
+    if has_data:
+        print("✅ В базе уже есть данные")
+    else:
+        print("🆕 База пустая, будем заполнять данными")
         
     orchestrator = FootballDataOrchestrator(
         ch_host=args.host,
@@ -263,6 +412,11 @@ async def main():
     try:
         await orchestrator.process_round(args.round)
         print(f"✅ Тур {args.round} успешно обработан!")
+        
+        # Проверяем результат
+        print("\n🔍 Проверяем результат после обработки...")
+        check_database_state(args.host, args.user, args.password, args.database)
+        
     except Exception as e:
         print(f"❌ Ошибка обработки тура {args.round}: {e}")
         raise

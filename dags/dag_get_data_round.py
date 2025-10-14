@@ -56,7 +56,7 @@ def get_next_round():
 
 
 with DAG(
-    dag_id="footboll",
+    dag_id="football",
     start_date=datetime.now() - timedelta(days=1),
     description='Анализ футбольных данных премьер лиги',
     schedule_interval=None,
