@@ -1,0 +1,8 @@
+python-telegram-bot==20.7
+pandas
+clickhouse-driver
+python-dotenv
+asyncio
+aiohttp
+playwright
+sofascore_wrapper

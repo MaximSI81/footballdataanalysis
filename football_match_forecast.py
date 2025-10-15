@@ -111,38 +111,66 @@ def get_match_analysis_from_clickhouse(team1_id, team2_id, team1_name, team2_nam
       AND fm.status = 'Ended'
     """
     
-   # ИСПРАВЛЕННЫЙ ЗАПРОС ДОМАШНИХ/ГОСТЕВЫХ
+       # ЗАПРОС ДОМАШНИХ/ГОСТЕВЫХ ПОКАЗАТЕЛЕЙ
     home_away_query = """
     SELECT 
         team_id,
         venue,
         matches,
-        ROUND(goals, 2) as goals,
-        ROUND(shots, 1) as shots
+        ROUND(avg_goals, 2) as goals,
+        ROUND(avg_conceded, 2) as conceded
     FROM (
-        -- Домашние матчи
+        -- Домашние матчи команды 1
         SELECT 
             home_team_id as team_id,
             'home' as venue,
             COUNT(*) as matches,
-            AVG(home_score) as goals,
-            NULL as shots  -- или получи из статистики если есть
+            AVG(home_score) as avg_goals,
+            AVG(away_score) as avg_conceded
         FROM football_matches 
-        WHERE home_team_id IN (%(team1)s, %(team2)s)
+        WHERE home_team_id = %(team1)s
         AND status = 'Ended'
         GROUP BY home_team_id
         
         UNION ALL
         
-        -- Гостевые матчи  
+        -- Гостевые матчи команды 1
         SELECT 
             away_team_id as team_id,
             'away' as venue, 
             COUNT(*) as matches,
-            AVG(away_score) as goals,
-            NULL as shots
+            AVG(away_score) as avg_goals,
+            AVG(home_score) as avg_conceded
         FROM football_matches
-        WHERE away_team_id IN (%(team1)s, %(team2)s)
+        WHERE away_team_id = %(team1)s
+        AND status = 'Ended'
+        GROUP BY away_team_id
+        
+        UNION ALL
+        
+        -- Домашние матчи команды 2
+        SELECT 
+            home_team_id as team_id,
+            'home' as venue,
+            COUNT(*) as matches,
+            AVG(home_score) as avg_goals,
+            AVG(away_score) as avg_conceded
+        FROM football_matches 
+        WHERE home_team_id = %(team2)s
+        AND status = 'Ended'
+        GROUP BY home_team_id
+        
+        UNION ALL
+        
+        -- Гостевые матчи команды 2
+        SELECT 
+            away_team_id as team_id,
+            'away' as venue, 
+            COUNT(*) as matches,
+            AVG(away_score) as avg_goals,
+            AVG(home_score) as avg_conceded
+        FROM football_matches
+        WHERE away_team_id = %(team2)s
         AND status = 'Ended'
         GROUP BY away_team_id
     )
@@ -300,15 +328,15 @@ def get_match_analysis_from_clickhouse(team1_id, team2_id, team1_name, team2_nam
         else:
             print(f"\n🤝 ИСТОРИЧЕСКИЕ ВСТРЕЧИ: нет данных")
         
-        # ДОМАШНИЕ/ГОСТЕВЫЕ ПОКАЗАТЕЛИ
+                # ДОМАШНИЕ/ГОСТЕВЫЕ ПОКАЗАТЕЛИ
         if home_away_stats:
             team1_home = next((s for s in home_away_stats if s[0] == team1_id and s[1] == 'home'), None)
             team2_away = next((s for s in home_away_stats if s[0] == team2_id and s[1] == 'away'), None)
             
             if team1_home and team2_away:
                 print(f"\n🏠 ДОМАШНИЕ/ГОСТЕВЫЕ ПОКАЗАТЕЛИ:")
-                print(f"   {team1_name} дома: {team1_home[3]}⚽ {team1_home[4]}🎯")
-                print(f"   {team2_name} в гостях: {team2_away[3]}⚽ {team2_away[4]}🎯")
+                print(f"   {team1_name} дома: {team1_home[3]}⚽ пропускает {team1_home[4]}🥅")
+                print(f"   {team2_name} в гостях: {team2_away[3]}⚽ пропускает {team2_away[4]}🥅")
         
         # ПРОГНОЗ ПО ТОТАЛАМ НА ОСНОВЕ xG
         if total_xg > 2.8:
