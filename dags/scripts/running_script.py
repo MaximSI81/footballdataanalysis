@@ -381,9 +381,9 @@ async def main():
     parser.add_argument('--tournament', required=True, type=int, help='ID турнира')
     parser.add_argument('--season', required=True, type=int, help='ID сезона')
     parser.add_argument('--host', default=os.getenv('CLICKHOUSE_HOST', 'clickhouse-server'), help='ClickHouse host')
-    parser.add_argument('--user', default=os.getenv('CLICKHOUSE_USER', 'default'), help='ClickHouse user')
+    parser.add_argument('--user', default=os.getenv('CLICKHOUSE_USER', 'username'), help='ClickHouse user')
     parser.add_argument('--password', default=os.getenv('CLICKHOUSE_PASSWORD', ''), help='ClickHouse password')
-    parser.add_argument('--database', default=os.getenv('CLICKHOUSE_DB', 'footboll_db'), help='ClickHouse database name')
+    parser.add_argument('--database', default=os.getenv('CLICKHOUSE_DB', 'football_db'), help='ClickHouse database name')
     parser.add_argument('--port', type=int, default=os.getenv('CLICKHOUSE_PORT', 9000), help='ClickHouse port')
         
     args = parser.parse_args()

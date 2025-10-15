@@ -1,5 +1,6 @@
 import pandas as pd
 from clickhouse_driver import Client
+import os
 
 def get_match_analysis_from_clickhouse(team1_id, team2_id, team1_name, team2_name, season_id=77142):
     """Сводный анализ матча с REAL xG данными, формой и историческими встречами"""
