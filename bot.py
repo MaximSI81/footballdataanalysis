@@ -1,9 +1,10 @@
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-from football_match_forecast import get_match_analysis_from_clickhouse
+from football_match_forecast import AdvancedFootballAnalyzer
 import io
 import sys
 import os
+import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,6 +40,7 @@ DATA_TYPES = {
     "🟨 Дисциплина": "discipline",
     "📈 Форма и H2H": "form",
     "💰 Прогнозы": "predictions",
+    "⭐ Ключевые игроки": "players",
     "📈 Все данные": "all"
 }
 
@@ -140,19 +142,21 @@ async def get_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Анализирую данные... Это может занять несколько секунд")
     
     try:
-        # Перехватываем вывод вашей функции
+        # Перехватываем вывод
         old_stdout = sys.stdout
         new_stdout = io.StringIO()
         sys.stdout = new_stdout
         
-        # Запускаем ваш анализ
-        get_match_analysis_from_clickhouse(
-            team1_id=home_team_id,
-            team2_id=away_team_id,
-            team1_name=home_team,
-            team2_name=away_team,
-            season_id=77142
-        )
+        # Запускаем асинхронный анализ
+        async with AdvancedFootballAnalyzer() as analyzer:
+            await analyzer.get_match_analysis(
+                team1_id=home_team_id,
+                team2_id=away_team_id,
+                team1_name=home_team,
+                team2_name=away_team,
+                tournament_id=203,  # РПЛ
+                season_id=77142
+            )
         
         # Получаем вывод
         analysis_output = new_stdout.getvalue()
@@ -176,7 +180,6 @@ async def get_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 full_msg = msg
                 
-            # Отправляем как обычный текст вместо Markdown
             await update.message.reply_text(full_msg)
             
         # Предлагаем новый анализ
@@ -206,11 +209,13 @@ def filter_output(output: str, data_type: str) -> str:
     
     # Включаем основные секции в зависимости от типа
     include_section = False
+    current_section = ""
     
     for line in lines:
         # Определяем начало новой секции
-        if any(marker in line for marker in ["🏠", "⚽", "🎯", "🟨", "📊", "🛡️", "📈", "🏆", "💰", "🎪"]):
-            include_section = should_include_section(line, data_type)
+        if any(marker in line for marker in ["🎯", "⚽", "🟨", "📊", "🛡️", "📈", "🏆", "💰", "🎪", "⭐", "⚔️", "🔑"]):
+            current_section = line.strip()
+            include_section = should_include_section(current_section, data_type)
         
         if include_section:
             filtered_lines.append(line)
@@ -221,18 +226,20 @@ def filter_output(output: str, data_type: str) -> str:
     
     return '\n'.join(filtered_lines)
 
-def should_include_section(line: str, data_type: str) -> bool:
+def should_include_section(section_line: str, data_type: str) -> bool:
     """Определяет, нужно ли включать секцию"""
-    section_markers = {
-        "basic": ["🏠", "⚽", "🎯", "🟨", "📊", "🛡️"],
-        "goals": ["⚽", "РЕЗУЛЬТАТИВНОСТЬ", "xG", "ЭФФЕКТИВНОСТЬ"],
-        "shots": ["🎯", "УДАРЫ", "xG", "УГЛОВЫЕ", "СТАНДАРТНЫЕ"],
+    section_mapping = {
+        "basic": ["🏠", "⚽", "🎯", "🟨", "📊", "🛡️", "🔄", "🎪", "🏹"],
+        "goals": ["⚽", "РЕЗУЛЬТАТИВНОСТЬ", "xG", "ЭФФЕКТИВНОСТЬ", "ГОЛОВ"],
+        "shots": ["🎯", "УДАРЫ", "xG", "УГЛОВЫЕ", "СТАНДАРТНЫЕ", "КАЧЕСТВО МОМЕНТОВ"],
         "discipline": ["🟨", "ДИСЦИПЛИНА", "ФОЛЫ", "КАРТОЧКИ"],
-        "form": ["📈", "ФОРМА", "H2H", "ИСТОРИЧЕСКИЕ", "ДОМАШНИЕ/ГОСТЕВЫЕ"],
-        "predictions": ["🏆", "💰", "🎯", "ПРОГНОЗ", "РЕКОМЕНДАЦИИ", "РЫНКИ", "ИНСАЙТЫ"]
+        "form": ["📈", "ФОРМА", "H2H", "ИСТОРИЧЕСКИЕ", "ДОМАШНИЕ/ГОСТЕВЫЕ", "🤝", "📊"],
+        "predictions": ["🏆", "💰", "🎯", "ПРОГНОЗ", "РЕКОМЕНДАЦИИ", "РЫНКИ", "ИНСАЙТЫ", "📈 КЛЮЧЕВЫЕ ИНСАЙТЫ"],
+        "players": ["⭐", "🔑", "⚔️", "КЛЮЧЕВЫЕ ИГРОКИ", "ПРОГРЕСС", "ПРОТИВОСТОЯНИЯ"]
     }
     
-    return any(marker in line for marker in section_markers.get(data_type, []))
+    markers = section_mapping.get(data_type, [])
+    return any(marker in section_line for marker in markers)
 
 def get_brief_overview(output: str) -> str:
     """Возвращает краткий обзор если фильтр пустой"""
@@ -240,11 +247,18 @@ def get_brief_overview(output: str) -> str:
     overview = []
     
     # Добавляем ключевые строки
+    key_phrases = [
+        "ПОЗИЦИЯ В ТАБЛИЦЕ", "РЕЗУЛЬТАТИВНОСТЬ", "ГОЛОВ ЗА МАТЧ", 
+        "xG", "ПРОГНОЗ", "РЕКОМЕНДАЦИИ", "КЛЮЧЕВЫЕ ИНСАЙТЫ"
+    ]
+    
     for line in lines:
-        if any(keyword in line for keyword in ["ГОЛОВ ЗА МАТЧ", "xG", "ПРОГНОЗ", "РЕКОМЕНДАЦИИ"]):
+        if any(phrase in line for phrase in key_phrases):
+            overview.append(line)
+        elif line.startswith("🎯") or line.startswith("⚽") or line.startswith("💰"):
             overview.append(line)
     
-    return '\n'.join(overview) if overview else output
+    return '\n'.join(overview) if overview else output[:2000] + "\n\n... (вывод сокращен)"
 
 def split_message(text: str, max_length: int = 4000) -> list:
     """Разбивает сообщение на части если оно слишком длинное"""
@@ -274,10 +288,14 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Запуск бота"""
-    # ЗАМЕНИТЕ НА ВАШ ТОКЕН
-    TOKEN = "YOUR_BOT_TOKEN_HERE"
+    # Получаем токен из переменных окружения
+    TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     
-    application = Application.builder().token(os.getenv("YOUR_BOT_TOKEN")).build()
+    if not TOKEN:
+        print("❌ Токен бота не найден. Убедитесь, что переменная TELEGRAM_BOT_TOKEN установлена в .env файле")
+        return
+    
+    application = Application.builder().token(TOKEN).build()
     
     # Создаем обработчик диалога
     conv_handler = ConversationHandler(
