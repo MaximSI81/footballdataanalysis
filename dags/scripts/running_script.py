@@ -56,7 +56,7 @@ class FootballDataOrchestrator:
                     match['status'],
                     match['venue'],
                     match['start_timestamp'],
-                    datetime.now()  # created_at
+                    datetime.now()
                 ))
             
             self.ch_client.execute(query, data)
@@ -73,7 +73,7 @@ class FootballDataOrchestrator:
             if not match_stats:
                 print("❌ Нет данных статистики матча для вставки")
                 return
-                
+            
             print(f"📊 Подготовка {len(match_stats)} записей статистики матча...")
             
             query = """
@@ -85,7 +85,9 @@ class FootballDataOrchestrator:
                 shots_inside_box, shots_outside_box, touches_in_penalty_area,
                 total_passes, accurate_passes, pass_accuracy, total_crosses, accurate_crosses,
                 total_long_balls, accurate_long_balls, tackles, tackles_won_percent, interceptions,
-                recoveries, clearances, created_at
+                recoveries, clearances, errors_lead_to_shot, errors_lead_to_goal,
+                duel_won_percent, dispossessed, ground_duels_percentage, aerial_duels_percentage, dribbles_percentage,
+                created_at
             ) VALUES
             """
             
@@ -121,20 +123,29 @@ class FootballDataOrchestrator:
                         int(stats.get('total_long_balls', 0)),
                         int(stats.get('accurate_long_balls', 0)),
                         int(stats.get('tackles', 0)),
-                        int(stats.get('tackles_won_percent', 0)),
+                        float(stats.get('tackles_won_percent', 0)),
                         int(stats.get('interceptions', 0)),
                         int(stats.get('recoveries', 0)),
                         int(stats.get('clearances', 0)),
+                        int(stats.get('errors_lead_to_shot', 0)),
+                        int(stats.get('errors_lead_to_goal', 0)),
+                        int(stats.get('duel_won_percent', 0)),
+                        int(stats.get('dispossessed', 0)),
+                        int(stats.get('ground_duels_percentage', 0)),
+                        int(stats.get('aerial_duels_percentage', 0)),
+                        int(stats.get('dribbles_percentage', 0)),
                         stats['created_at']
                     ))
                 except Exception as e:
                     print(f"  ❌ Ошибка подготовки статистики: {e}")
+                    print(f"     Данные: {stats}")
                     continue
             
             if not data:
                 print("❌ Нет данных для вставки статистики")
                 return
                 
+            print(f"🔍 Выполняем запрос к ClickHouse для {len(data)} записей...")
             self.ch_client.execute(query, data)
             print(f"✅ Успешно вставлено {len(data)} записей статистики матча")
             
@@ -181,56 +192,6 @@ class FootballDataOrchestrator:
         except Exception as e:
             print(f"❌ Ошибка вставки карточек: {e}")
     
-    async def process_round(self, round_number: int):
-        """Обрабатывает тур с полным сбором данных"""
-        print(f"🎯 Запуск сбора данных для тура {round_number}")
-        
-        async with FootballDataCollector() as collector:
-            round_data = await collector.collect_round_data(
-                tournament_id=self.tournament_id,
-                season_id=self.season_id, 
-                round_number=round_number
-            )
-            
-            if not round_data or not round_data.get('matches'):
-                print(f"❌ Не удалось собрать данные для тура {round_number}")
-                return
-            
-            total_players = 0
-            total_cards = 0
-            total_match_stats = 0
-            
-            for match_data in round_data['matches']:
-                match_info = match_data['match_info']
-                player_stats = match_data['player_stats']
-                incidents = match_data['incidents']
-                match_stats = match_data['match_stats']
-                
-                total_players += len(player_stats)
-                total_cards += len(incidents)
-                total_match_stats += len(match_stats)
-                
-                print(f"📊 Матч {match_info['match_id']}: {len(player_stats)} игроков, {len(incidents)} карточек, {len(match_stats)} записей статистики")
-                
-                # Сохраняем данные в ClickHouse
-                if player_stats:
-                    self._insert_player_stats(player_stats)
-                    print(f"💾 Сохранено {len(player_stats)} записей статистики игроков")
-                
-                if incidents:
-                    self._insert_cards(incidents)
-                    print(f"🟨 Сохранено {len(incidents)} карточек")
-                
-                if match_stats:
-                    self._insert_match_stats(match_stats)
-                    print(f"📈 Сохранено {len(match_stats)} записей статистики матча")
-                
-                # Вставляем матчи (если еще не вставлены)
-                self._insert_matches([match_info])
-                print(f"🏟️  Сохранен матч {match_info['match_id']}")
-            
-            print(f"🎉 Тур {round_number} обработан: {total_players} игроков, {total_cards} карточек, {total_match_stats} записей статистики")
-
     def _insert_player_stats(self, player_stats: List[Dict[str, Any]]):
         """Вставляет статистику игроков в ClickHouse"""
         try:
@@ -313,7 +274,7 @@ class FootballDataOrchestrator:
                         int(stats.get('punches', 0)),
                         int(stats.get('good_high_claim', 0)),
                         int(stats.get('saved_shots_from_inside_box', 0)),
-                        datetime.now()  # created_at
+                        datetime.now()
                     ))
                 except Exception as e:
                     print(f"  ❌ Ошибка подготовки записи {i}: {e}")
@@ -334,7 +295,339 @@ class FootballDataOrchestrator:
             traceback.print_exc()
             raise
 
-# ДОБАВЬТЕ ЭТУ ФУНКЦИЮ ДЛЯ ПРОВЕРКИ ДАННЫХ
+    async def update_team_stats_cache(self, tournament_id: int, season_id: int):
+        """Обновляет кэш статистики команд из API"""
+        try:
+            print(f"🔄 Обновление кэша статистики команд из API...")
+            
+            async with FootballDataCollector() as collector:
+                # Получаем все команды турнира
+                teams = self._get_tournament_teams(tournament_id, season_id)
+                
+                if not teams:
+                    print("❌ Не найдено команд для обновления кэша")
+                    return
+                
+                print(f"📊 Найдено {len(teams)} команд для обновления кэша")
+                
+                updated_count = 0
+                for team_id, team_name in teams.items():
+                    try:
+                        print(f"🔍 Запрашиваем статистику команды {team_name} (ID: {team_id})")
+                        stats = await collector.get_team_season_stats(team_id, tournament_id, season_id)
+                        
+                        if stats:
+                            # ДЕБАГ: выводим полученные данные
+                            print(f"📋 Получена статистика для {team_name}:")
+                            print(f"   Матчи: {stats.get('matches', 0)}")
+                            print(f"   Голы: {stats.get('goalsScored', 0)} забито, {stats.get('goalsConceded', 0)} пропущено")
+                            print(f"   Владение: {stats.get('averageBallPossession', 0)}%")
+                            print(f"   Удары: {stats.get('shots', 0)} всего, {stats.get('shotsOnTarget', 0)} в створ")
+                            print(f"   xG: {stats.get('expectedGoals', 0)}")
+                            
+                            query = """
+                            INSERT INTO team_stats_cache (
+                                team_id, tournament_id, season_id, matches_played, goals_scored, goals_conceded,
+                                avg_possession, avg_shots, avg_shots_on_target, avg_xg, avg_corners, 
+                                avg_fouls, avg_yellow_cards, big_chances, big_chances_missed,
+                                goals_inside_box, goals_outside_box, headed_goals, pass_accuracy, fast_breaks,
+                                updated_at
+                            ) VALUES (
+                                %(team_id)s, %(tournament_id)s, %(season_id)s, %(matches)s, %(goals_scored)s, %(goals_conceded)s,
+                                %(avg_possession)s, %(shots)s, %(shots_on_target)s, %(xg)s, %(corners)s,
+                                %(fouls)s, %(yellow_cards)s, %(big_chances)s, %(big_chances_missed)s,
+                                %(goals_inside_box)s, %(goals_outside_box)s, %(headed_goals)s, %(pass_accuracy)s, %(fast_breaks)s,
+                                NOW()
+                            )
+                            """
+                            
+                            self.ch_client.execute(query, {
+                                'team_id': team_id,
+                                'tournament_id': tournament_id,
+                                'season_id': season_id,
+                                'matches': stats.get('matches', 0),
+                                'goals_scored': stats.get('goalsScored', 0),
+                                'goals_conceded': stats.get('goalsConceded', 0),
+                                'avg_possession': stats.get('averageBallPossession', 0),
+                                'shots': stats.get('shots', 0),
+                                'shots_on_target': stats.get('shotsOnTarget', 0),
+                                'xg': stats.get('expectedGoals', 0),
+                                'corners': stats.get('corners', 0),
+                                'fouls': stats.get('fouls', 0),
+                                'yellow_cards': stats.get('yellowCards', 0),
+                                'big_chances': stats.get('bigChances', 0),
+                                'big_chances_missed': stats.get('bigChancesMissed', 0),
+                                'goals_inside_box': stats.get('goalsFromInsideTheBox', 0),
+                                'goals_outside_box': stats.get('goalsFromOutsideTheBox', 0),
+                                'headed_goals': stats.get('headedGoals', 0),
+                                'pass_accuracy': stats.get('accuratePassesPercentage', 0),
+                                'fast_breaks': stats.get('fastBreaks', 0)
+                            })
+                            
+                            updated_count += 1
+                            print(f"✅ Статистика команды {team_name} обновлена в кэше")
+                        else:
+                            print(f"⚠️  Не удалось получить статистику для команды {team_name}")
+                        
+                        # Увеличиваем задержку между запросами
+                        await asyncio.sleep(2)
+                        
+                    except Exception as e:
+                        print(f"❌ Ошибка обработки команды {team_id} ({team_name}): {e}")
+                        continue
+                
+                print(f"✅ Кэш статистики команд обновлен. Обработано: {updated_count}/{len(teams)} команд")
+                
+        except Exception as e:
+            print(f"❌ Критическая ошибка обновления кэша статистики: {e}")
+            import traceback
+            traceback.print_exc()
+
+    async def update_team_positions_cache(self, tournament_id: int, season_id: int):
+        """Обновляет кэш позиций команд из API"""
+        try:
+            print(f"🔄 Обновление кэша позиций команд из API...")
+            
+            async with FootballDataCollector() as collector:
+                # Получаем турнирную таблицу
+                standings_data = await collector.get_tournament_standings(tournament_id, season_id)
+                
+                if not standings_data or 'standings' not in standings_data:
+                    print("❌ Нет данных standings")
+                    return
+                
+                updated_count = 0
+                for standing_type in standings_data['standings']:
+                    if standing_type['type'] == 'total':  # Общая таблица
+                        for row in standing_type['rows']:
+                            try:
+                                team = row['team']
+                                team_id = team['id']
+                                team_name = team['name']
+                                
+                                # Получаем историческую динамику позиций
+                                performance_data = await collector.get_team_performance_graph(team_id, tournament_id, season_id)
+                                
+                                # Анализируем тренд на основе исторических данных
+                                trend = self._analyze_position_trend(performance_data, row['position'])
+                                
+                                # Получаем форму команды из последних матчей
+                                team_form = self._extract_recent_form(performance_data, team_id)
+                                
+                                query = """
+                                INSERT INTO team_positions_cache (
+                                    team_id, tournament_id, season_id, position, points, goal_difference,
+                                    matches_played, wins, draws, losses, goals_for, goals_against,
+                                    form, trend, last_updated_round, updated_at
+                                ) VALUES (
+                                    %(team_id)s, %(tournament_id)s, %(season_id)s, %(position)s, %(points)s, %(goal_difference)s,
+                                    %(matches_played)s, %(wins)s, %(draws)s, %(losses)s, %(goals_for)s, %(goals_against)s,
+                                    %(form)s, %(trend)s, %(last_updated_round)s, NOW()
+                                )
+                                """
+                                
+                                # Парсим разницу мячей из формата "+12"
+                                goal_diff_str = row.get('scoreDiffFormatted', '0')
+                                try:
+                                    if goal_diff_str.startswith('+'):
+                                        goal_diff = int(goal_diff_str[1:])
+                                    elif goal_diff_str.startswith('-'):
+                                        goal_diff = int(goal_diff_str)
+                                    else:
+                                        goal_diff = int(goal_diff_str)
+                                except:
+                                    goal_diff = 0
+                                
+                                self.ch_client.execute(query, {
+                                    'team_id': team_id,
+                                    'tournament_id': tournament_id,
+                                    'season_id': season_id,
+                                    'position': row['position'],
+                                    'points': row['points'],
+                                    'goal_difference': goal_diff,
+                                    'matches_played': row['matches'],
+                                    'wins': row['wins'],
+                                    'draws': row['draws'],
+                                    'losses': row['losses'],
+                                    'goals_for': row['scoresFor'],
+                                    'goals_against': row['scoresAgainst'],
+                                    'form': team_form,
+                                    'trend': trend,
+                                    'last_updated_round': self._get_current_round_from_performance(performance_data)
+                                })
+                                
+                                updated_count += 1
+                                print(f"✅ Позиция команды {team_name}: {row['position']} место ({trend})")
+                                
+                            except Exception as e:
+                                print(f"❌ Ошибка обработки команды {team_name}: {e}")
+                                continue
+                    
+                    print(f"✅ Кэш позиций команд обновлен. Обработано: {updated_count} команд")
+                    
+        except Exception as e:
+            print(f"❌ Ошибка обновления кэша позиций: {e}")
+    def _analyze_position_trend(self, performance_data: Dict, current_position: int) -> str:
+        """Анализирует тренд позиции на основе исторических данных"""
+        if not performance_data or 'graphData' not in performance_data:
+            return "stable"
+        
+        graph_data = performance_data['graphData']
+        if len(graph_data) < 2:
+            return "stable"
+        
+        # Берем последние 3 позиции для анализа
+        recent_positions = [point['position'] for point in graph_data[-3:]]
+        
+        if len(recent_positions) >= 2:
+            previous_position = recent_positions[-2]
+            if current_position < previous_position:
+                return "up"  # улучшение
+            elif current_position > previous_position:
+                return "down"  # ухудшение
+        
+        return "stable"
+
+    def _extract_recent_form(self, performance_data: Dict, team_id: int) -> str:
+        """Извлекает форму команды из последних матчей"""
+        if not performance_data or 'graphData' not in performance_data:
+            return ""
+        
+        form_results = []
+        graph_data = performance_data['graphData']
+        
+        # Берем последние 5 недель для формы
+        for week_data in graph_data[-5:]:
+            for event in week_data.get('events', []):
+                try:
+                    # ПРОВЕРЯЕМ наличие всех необходимых полей
+                    if ('homeTeam' not in event or 'awayTeam' not in event or 
+                        'homeScore' not in event or 'awayScore' not in event):
+                        continue
+                        
+                    home_score = event['homeScore'].get('current')
+                    away_score = event['awayScore'].get('current')
+                    
+                    # Пропускаем если нет данных о счете
+                    if home_score is None or away_score is None:
+                        continue
+                    
+                    if event['homeTeam']['id'] == team_id:
+                        # Команда играла дома
+                        if home_score > away_score:
+                            form_results.append('W')
+                        elif home_score < away_score:
+                            form_results.append('L')
+                        else:
+                            form_results.append('D')
+                    elif event['awayTeam']['id'] == team_id:
+                        # Команда играла в гостях
+                        if away_score > home_score:
+                            form_results.append('W')
+                        elif away_score < home_score:
+                            form_results.append('L')
+                        else:
+                            form_results.append('D')
+                except Exception as e:
+                    print(f"⚠️  Ошибка обработки события формы: {e}")
+                    continue
+        
+        # Берем последние 5 результатов
+        return ''.join(form_results[-5:])
+
+    def _get_current_round_from_performance(self, performance_data: Dict) -> int:
+        """Определяет текущий тур на основе performance данных"""
+        if not performance_data or 'graphData' not in performance_data:
+            return 0
+        
+        graph_data = performance_data['graphData']
+        if not graph_data:
+            return 0
+        
+        return graph_data[-1].get('week', 0)
+
+    def _get_tournament_teams(self, tournament_id: int, season_id: int) -> Dict[int, str]:
+        """Получает список команд турнира"""
+        try:
+            query = """
+            SELECT DISTINCT team_id, team_name 
+            FROM (
+                SELECT home_team_id as team_id, home_team_name as team_name
+                FROM football_matches 
+                WHERE tournament_id = %(tournament_id)s AND season_id = %(season_id)s
+                UNION ALL  -- ИСПРАВЛЕНО: добавлено ALL
+                SELECT away_team_id as team_id, away_team_name as team_name  
+                FROM football_matches
+                WHERE tournament_id = %(tournament_id)s AND season_id = %(season_id)s
+            )
+            """
+            results = self.ch_client.execute(query, {
+                'tournament_id': tournament_id, 
+                'season_id': season_id
+            })
+            teams = {team_id: team_name for team_id, team_name in results}
+            print(f"📋 Найдено {len(teams)} команд в турнире {tournament_id} сезона {season_id}")
+            return teams
+        except Exception as e:
+            print(f"❌ Ошибка получения списка команд: {e}")
+            return {}
+
+    async def process_round(self, round_number: int):
+        """Обрабатывает тур с полным сбором данных"""
+        print(f"🎯 Запуск сбора данных для тура {round_number}")
+        
+        async with FootballDataCollector() as collector:
+            round_data = await collector.collect_round_data(
+                tournament_id=self.tournament_id,
+                season_id=self.season_id, 
+                round_number=round_number
+            )
+            
+            if not round_data or not round_data.get('matches'):
+                print(f"❌ Не удалось собрать данные для тура {round_number}")
+                return
+            
+            total_players = 0
+            total_cards = 0
+            total_match_stats = 0
+            
+            for match_data in round_data['matches']:
+                match_info = match_data['match_info']
+                player_stats = match_data['player_stats']
+                incidents = match_data['incidents']
+                match_stats = match_data['match_stats']
+                
+                total_players += len(player_stats)
+                total_cards += len(incidents)
+                total_match_stats += len(match_stats)
+                
+                print(f"📊 Матч {match_info['match_id']}: {len(player_stats)} игроков, {len(incidents)} карточек, {len(match_stats)} записей статистики")
+                
+                # Сохраняем данные в ClickHouse
+                if player_stats:
+                    self._insert_player_stats(player_stats)
+                    print(f"💾 Сохранено {len(player_stats)} записей статистики игроков")
+                
+                if incidents:
+                    self._insert_cards(incidents)
+                    print(f"🟨 Сохранено {len(incidents)} карточек")
+                
+                if match_stats:
+                    self._insert_match_stats(match_stats)
+                    print(f"📈 Сохранено {len(match_stats)} записей статистики матча")
+                
+                # Вставляем матчи (если еще не вставлены)
+                self._insert_matches([match_info])
+                print(f"🏟️  Сохранен матч {match_info['match_id']}")
+            
+            # ОБНОВЛЯЕМ КЭШ-ТАБЛИЦЫ ПОСЛЕ СБОРА ДАННЫХ
+            print(f"🔄 Запуск обновления кэша статистики команд...")
+            await self.update_team_stats_cache(self.tournament_id, self.season_id)
+            await self.update_team_positions_cache(self.tournament_id, self.season_id)
+            
+            print(f"🎉 Тур {round_number} обработан: {total_players} игроков, {total_cards} карточек, {total_match_stats} записей статистики")
+
+# Функция для проверки состояния базы данных
 def check_database_state(host, user, password, database):
     """Проверяет состояние базы данных"""
     ch_client = Client(
@@ -356,6 +649,14 @@ def check_database_state(host, user, password, database):
         # Проверяем карточки
         cards_count = ch_client.execute("SELECT COUNT(*) FROM football_cards")[0][0]
         print(f"🟨 Карточек в базе: {cards_count}")
+        
+        # Проверяем кэш статистики
+        stats_cache_count = ch_client.execute("SELECT COUNT(*) FROM team_stats_cache")[0][0]
+        print(f"📈 Записей в кэше статистики: {stats_cache_count}")
+        
+        # Проверяем кэш позиций
+        positions_cache_count = ch_client.execute("SELECT COUNT(*) FROM team_positions_cache")[0][0]
+        print(f"🏆 Записей в кэше позиций: {positions_cache_count}")
         
         # Показываем примеры матчей
         if matches_count > 0:

@@ -13,20 +13,21 @@ class TournamentMatchesCollector:
         )
         self.api = None
     
-    async def collect_season_data(self, tournament_id: int, season_id: int, season_name: str):
-        """Собирает данные всего сезона (30 туров)"""
+    async def collect_season_data(self, tournament_id: int, season_id: int, season_name: str, rounds_count: int):
+        """Собирает данные всего сезона"""
         
         try:
             # Создаем экземпляр API
             self.api = SofascoreAPI()
             
             print(f"🎯 Начинаем сбор сезона: {season_name}")
+            print(f"📊 Количество туров: {rounds_count}")
             print("=" * 50)
             
             all_matches_data = []
             successful_rounds = 0
             
-            for round_number in range(1, 31):  # Всегда 30 туров
+            for round_number in range(1, rounds_count + 1):
                 print(f"📊 Обрабатываем тур {round_number}...")
                 
                 round_matches = await self.get_round_matches(tournament_id, season_id, round_number)
@@ -44,7 +45,7 @@ class TournamentMatchesCollector:
             # Вставляем все собранные данные
             if all_matches_data:
                 self.insert_matches_data(all_matches_data)
-                print(f"\n🎉 Сбор завершен! Успешных туров: {successful_rounds}/30")
+                print(f"\n🎉 Сбор завершен! Успешных туров: {successful_rounds}/{rounds_count}")
                 print(f"📊 Всего загружено: {len(all_matches_data)} матчей")
                 return True
             else:
@@ -150,9 +151,9 @@ class TournamentMatchesCollector:
         except Exception as e:
             print(f"❌ Ошибка вставки данных: {e}")
 
-# ОСНОВНОЙ СКРИПТ ДЛЯ ДВУХ СЕЗОНОВ
+# ОСНОВНОЙ СКРИПТ ДЛЯ ВСЕХ ТУРНИРОВ
 async def main():
-    """Загружает два указанных сезона по 30 туров каждый"""
+    """Загружает данные по всем турнирам с указанными сезонами"""
     
     collector = TournamentMatchesCollector(
         ch_host='localhost',
@@ -161,40 +162,105 @@ async def main():
         ch_database='football_db'
     )
     
-    # Параметры для РПЛ
-    TOURNAMENT_ID = 203  # Russian Premier League
-    
-    # Два нужных сезона
-    SEASONS = [
-        (52470, "РПЛ 2023/2024"),  # season_id, название
-        (61712, "РПЛ 2024/2025"),  # season_id, название
+    # Конфигурация всех турниров
+    TOURNAMENTS = [
+        # Лига 1 (Франция)
+        {
+            'id': 34,
+            'name': 'Лига 1',
+            'seasons': [
+                (61736, "Лига 1 2024/2025", 34),
+                (52571, "Лига 1 2023/2024", 34)
+            ]
+        },
+        # Бундеслига (Германия)
+        {
+            'id': 35,
+            'name': 'Бундеслига',
+            'seasons': [
+                (63516, "Бундеслига 2024/2025", 34),
+                (52608, "Бундеслига 2023/2024", 34)
+            ]
+        },
+        # Английская Премьер-Лига
+        {
+            'id': 17,
+            'name': 'Английская Премьер-Лига',
+            'seasons': [
+                (61627, "АПЛ 2024/2025", 38),
+                (52186, "АПЛ 2023/2024", 38)
+            ]
+        },
+        # Ла Лига (Испания)
+        {
+            'id': 8,
+            'name': 'Ла Лига',
+            'seasons': [
+                (61643, "Ла Лига 2024/2025", 38),
+                (52376, "Ла Лига 2023/2024", 38)
+            ]
+        },
+        # Серия А (Италия)
+        {
+            'id': 23,
+            'name': 'Серия А',
+            'seasons': [
+                (63515, "Серия А 2024/2025", 38),
+                (52760, "Серия А 2023/2024", 38)
+            ]
+        },
+        # Российская Премьер-Лига
+        {
+            'id': 203,
+            'name': 'Российская Премьер-Лига',
+            'seasons': [
+                (52470, "РПЛ 2023/2024", 30),
+                (61712, "РПЛ 2024/2025", 30)
+            ]
+        }
     ]
     
-    for season_id, season_name in SEASONS:
-        print(f"\n{'='*60}")
-        print(f"🚀 ЗАГРУЗКА СЕЗОНА: {season_name}")
-        print(f"📊 Турнир: {TOURNAMENT_ID}, Сезон: {season_id}")
-        print(f"🎯 Количество туров: 30")
-        print('='*60)
+    total_matches = 0
+    total_seasons = 0
+    
+    for tournament in TOURNAMENTS:
+        tournament_id = tournament['id']
+        tournament_name = tournament['name']
         
-        success = await collector.collect_season_data(
-            tournament_id=TOURNAMENT_ID,
-            season_id=season_id, 
-            season_name=season_name
-        )
+        print(f"\n{'='*80}")
+        print(f"🏆 ТУРНИР: {tournament_name} (ID: {tournament_id})")
+        print(f"📊 Количество сезонов: {len(tournament['seasons'])}")
+        print('='*80)
         
-        if success:
-            print(f"🎉 Сезон {season_name} успешно загружен!")
-        else:
-            print(f"❌ Ошибка загрузки сезона {season_name}")
-        
-        # Пауза между сезонами
-        print("\n⏳ Пауза 3 секунды перед следующим сезоном...")
-        await asyncio.sleep(3)
-
-
+        for season_id, season_name, rounds_count in tournament['seasons']:
+            print(f"\n🎯 ЗАГРУЗКА СЕЗОНА: {season_name}")
+            print(f"📊 Турнир: {tournament_name}, Сезон: {season_id}")
+            print(f"🎯 Количество туров: {rounds_count}")
+            print('-' * 50)
+            
+            success = await collector.collect_season_data(
+                tournament_id=tournament_id,
+                season_id=season_id, 
+                season_name=season_name,
+                rounds_count=rounds_count
+            )
+            
+            if success:
+                print(f"🎉 Сезон {season_name} успешно загружен!")
+                total_seasons += 1
+            else:
+                print(f"❌ Ошибка загрузки сезона {season_name}")
+            
+            # Пауза между сезонами
+            print("\n⏳ Пауза 5 секунд перед следующим сезоном...")
+            await asyncio.sleep(5)
+    
+    print(f"\n{'='*80}")
+    print(f"🎉 ВСЕ ТУРНИРЫ ЗАГРУЖЕНЫ!")
+    print(f"📊 Всего обработано сезонов: {total_seasons}")
+    print(f"📊 Всего турниров: {len(TOURNAMENTS)}")
+    print('='*80)
 
 if __name__ == "__main__":
-    # Основной запуск - два сезона по 30 туров
+    # Основной запуск - все турниры и сезоны
     asyncio.run(main())
-    
