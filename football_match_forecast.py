@@ -22,13 +22,14 @@ class AdvancedFootballAnalyzer:
         if self.ch_client:
             self.ch_client.disconnect()
 
+    # Существующие методы получения статистики (без изменений)
     def get_team_stats_from_db(self, team_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
         """Получает статистику команды из кэш-таблицы"""
         try:
             query = """
             SELECT 
                 matches_played, goals_scored, goals_conceded, avg_possession,
-                avg_shots, avg_shots_on_target, avg_xg, avg_corners,
+                avg_shots, avg_shots_on_target, avg_corners,
                 avg_fouls, avg_yellow_cards, big_chances, big_chances_missed,
                 goals_inside_box, goals_outside_box, headed_goals, pass_accuracy, fast_breaks
             FROM team_stats_cache 
@@ -53,17 +54,16 @@ class AdvancedFootballAnalyzer:
                     'averageBallPossession': result[0][3],
                     'shots': result[0][4],
                     'shotsOnTarget': result[0][5],
-                    'expectedGoals': result[0][6],
-                    'corners': result[0][7],
-                    'fouls': result[0][8],
-                    'yellowCards': result[0][9],
-                    'bigChances': result[0][10],
-                    'bigChancesMissed': result[0][11],
-                    'goalsFromInsideTheBox': result[0][12],
-                    'goalsFromOutsideTheBox': result[0][13],
-                    'headedGoals': result[0][14],
-                    'accuratePassesPercentage': result[0][15],
-                    'fastBreaks': result[0][16]
+                    'corners': result[0][6],
+                    'fouls': result[0][7],
+                    'yellowCards': result[0][8],
+                    'bigChances': result[0][9],
+                    'bigChancesMissed': result[0][10],
+                    'goalsFromInsideTheBox': result[0][11],
+                    'goalsFromOutsideTheBox': result[0][12],
+                    'headedGoals': result[0][13],
+                    'accuratePassesPercentage': result[0][14],
+                    'fastBreaks': result[0][15]
                 }
                 return stats
             return {}
@@ -143,7 +143,7 @@ class AdvancedFootballAnalyzer:
             return {}
 
     def get_team_xg_from_db(self, team1_id: int, team2_id: int, season_id: int) -> Tuple[float, float]:
-        """Получает xG статистику команд из основной таблицы статистики"""
+        """Получает xG статистику команд из football_match_stats"""
         try:
             query = """
             SELECT 
@@ -156,6 +156,8 @@ class AdvancedFootballAnalyzer:
                 WHERE season_id = %(season_id)s 
                 AND status = 'Ended'
             )
+            AND expected_goals IS NOT NULL
+            AND expected_goals > 0
             GROUP BY team_id
             """
             
@@ -179,16 +181,397 @@ class AdvancedFootballAnalyzer:
         except Exception as e:
             print(f"❌ Ошибка получения xG из БД: {e}")
             return 0.0, 0.0
+
+    def safe_divide(self, numerator, denominator, default=0.0):
+        """Безопасное деление с обработкой нулей"""
+        if denominator and denominator > 0:
+            return numerator / denominator
+        return default
+
+    def analyze_position_trend(self, position_data: Dict) -> Tuple[str, str]:
+        """Анализирует тренд позиции команды"""
+        if not position_data:
+            return "N/A", ""
+            
+        current_position = position_data.get('position', 0)
+        trend = position_data.get('trend', 'stable')
         
+        trend_icons = {
+            'up': '🟢 улучшение',
+            'down': '🔴 ухудшение', 
+            'stable': '🟡 стабильно'
+        }
+        
+        return str(current_position), trend_icons.get(trend, '🟡 стабильно')
+
+    def get_team_crosses_longballs_from_db(self, team1_id: int, team2_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает данные о кроссах и длинных передачах"""
+        try:
+            query = """
+            SELECT 
+                team_id,
+                AVG(total_crosses) as avg_total_crosses,
+                AVG(accurate_crosses) as avg_accurate_crosses,
+                AVG(total_long_balls) as avg_total_long_balls,
+                AVG(accurate_long_balls) as avg_accurate_long_balls
+            FROM football_match_stats 
+            WHERE team_id IN (%(team1)s, %(team2)s)
+            AND match_id IN (
+                SELECT match_id FROM football_matches 
+                WHERE season_id = %(season_id)s AND status = 'Ended'
+            )
+            GROUP BY team_id
+            """
+            
+            results = self.ch_client.execute(query, {
+                'team1': team1_id,
+                'team2': team2_id, 
+                'season_id': season_id
+            })
+            
+            stats = {}
+            for team_id, avg_crosses, avg_accurate_crosses, avg_long_balls, avg_accurate_long_balls in results:
+                stats[team_id] = {
+                    'total_crosses': avg_crosses or 0,
+                    'accurate_crosses': avg_accurate_crosses or 0,
+                    'total_long_balls': avg_long_balls or 0,
+                    'accurate_long_balls': avg_accurate_long_balls or 0
+                }
+            
+            return stats
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения кроссов и длинных передач: {e}")
+            return {}
+
+    # НОВЫЕ МЕТОДЫ ДЛЯ УНИКАЛЬНЫХ ПРОГНОЗОВ
+    def get_referee_stats_from_db(self, referee_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает статистику рефери из БД"""
+        try:
+            query = """
+            SELECT 
+                referee_id, referee_name, referee_yellow_cards, referee_red_cards,
+                referee_yellow_red_cards, referee_games, referee_country
+            FROM match_fixtures 
+            WHERE referee_id = %(referee_id)s
+            AND tournament_id = %(tournament_id)s
+            AND season_id = %(season_id)s
+            LIMIT 1
+            """
+            
+            result = self.ch_client.execute(query, {
+                'referee_id': referee_id,
+                'tournament_id': tournament_id,
+                'season_id': season_id
+            })
+            
+            if result:
+                return {
+                    'referee_id': result[0][0],
+                    'name': result[0][1],
+                    'yellow_cards': result[0][2],
+                    'red_cards': result[0][3],
+                    'yellow_red_cards': result[0][4],
+                    'games': result[0][5],
+                    'country': result[0][6]
+                }
+            return {}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики рефери: {e}")
+            return {}
+
+    def get_team_discipline_stats(self, team_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает статистику дисциплины команды"""
+        try:
+            query = """
+            SELECT 
+                AVG(fouls) as avg_fouls,
+                AVG(yellow_cards) as avg_yellow_cards,
+                COUNT(*) as matches
+            FROM football_match_stats 
+            WHERE team_id = %(team_id)s
+            AND match_id IN (
+                SELECT match_id FROM football_matches 
+                WHERE tournament_id = %(tournament_id)s 
+                AND season_id = %(season_id)s
+                AND status = 'Ended'
+            )
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team_id': team_id,
+                'tournament_id': tournament_id,
+                'season_id': season_id
+            })
+            
+            if result and result[0][2] > 0:
+                return {
+                    'avg_fouls': result[0][0] or 0,
+                    'avg_yellow_cards': result[0][1] or 0,
+                    'matches': result[0][2]
+                }
+            return {}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики дисциплины: {e}")
+            return {}
+
+    def get_home_away_discipline_stats(self, team_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает статистику дисциплины команды дома и в гостях"""
+        try:
+            query = """
+            SELECT 
+                team_type,
+                AVG(fouls) as avg_fouls,
+                AVG(yellow_cards) as avg_yellow_cards,
+                COUNT(*) as matches
+            FROM football_match_stats 
+            WHERE team_id = %(team_id)s
+            AND match_id IN (
+                SELECT match_id FROM football_matches 
+                WHERE tournament_id = %(tournament_id)s 
+                AND season_id = %(season_id)s
+                AND status = 'Ended'
+            )
+            GROUP BY team_type
+            """
+            
+            results = self.ch_client.execute(query, {
+                'team_id': team_id,
+                'tournament_id': tournament_id,
+                'season_id': season_id
+            })
+            
+            stats = {'home': {}, 'away': {}}
+            for team_type, avg_fouls, avg_yellow_cards, matches in results:
+                if team_type == 'home':
+                    stats['home'] = {
+                        'avg_fouls': avg_fouls or 0,
+                        'avg_yellow_cards': avg_yellow_cards or 0,
+                        'matches': matches
+                    }
+                elif team_type == 'away':
+                    stats['away'] = {
+                        'avg_fouls': avg_fouls or 0,
+                        'avg_yellow_cards': avg_yellow_cards or 0,
+                        'matches': matches
+                    }
+            
+            return stats
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения домашней/гостевой статистики дисциплины: {e}")
+            return {'home': {}, 'away': {}}
+
+    def predict_yellow_cards(self, team1_id: int, team2_id: int, referee_id: int, 
+                            tournament_id: int, season_id: int) -> Dict[str, Any]:
+        """Прогнозирует количество желтых карточек в матче"""
+        try:
+            # Получаем статистику рефери
+            referee_stats = self.get_referee_stats_from_db(referee_id, tournament_id, season_id)
+            
+            # Получаем домашнюю/гостевую статистику
+            team1_home_away = self.get_home_away_discipline_stats(team1_id, tournament_id, season_id)
+            team2_home_away = self.get_home_away_discipline_stats(team2_id, tournament_id, season_id)
+            
+            # Берем домашние показатели для первой команды и гостевые для второй
+            team1_home_yellows = team1_home_away.get('home', {}).get('avg_yellow_cards', 0)
+            team2_away_yellows = team2_home_away.get('away', {}).get('avg_yellow_cards', 0)
+            
+            # Корректировка на строгость рефери
+            referee_avg_yellows = 0
+            if referee_stats and referee_stats.get('games', 0) > 0:
+                referee_avg_yellows = referee_stats['yellow_cards'] / referee_stats['games']
+            
+            # Расчет прогноза
+            base_prediction = (team1_home_yellows + team2_away_yellows) / 2
+            
+            # Корректировка на рефери (если есть данные)
+            if referee_avg_yellows > 0:
+                league_avg_yellows = 3.0  # среднее по лиге
+                referee_factor = (referee_avg_yellows - league_avg_yellows) * 0.3
+                final_prediction = max(0, base_prediction + referee_factor)
+            else:
+                final_prediction = base_prediction
+            
+            # Определяем тотал
+            if final_prediction > 4.5:
+                cards_total = "ТБ 4.5"
+                confidence = "🔴 Высокая"
+            elif final_prediction > 3.5:
+                cards_total = "ТБ 4.5" 
+                confidence = "🟡 Средняя"
+            elif final_prediction > 2.5:
+                cards_total = "ТМ 4.5"
+                confidence = "🟢 Низкая"
+            else:
+                cards_total = "ТМ 4.5"
+                confidence = "🔴 Высокая"
+            
+            return {
+                'predicted_yellow_cards': round(final_prediction, 1),
+                'team1_home_yellows': round(team1_home_yellows, 1),
+                'team2_away_yellows': round(team2_away_yellows, 1),
+                'referee_avg_yellows': round(referee_avg_yellows, 1) if referee_avg_yellows > 0 else "N/A",
+                'cards_total_prediction': cards_total,
+                'confidence': confidence,
+                'referee_name': referee_stats.get('name', 'Неизвестно'),
+                'referee_games': referee_stats.get('games', 0)
+            }
+            
+        except Exception as e:
+            print(f"❌ Ошибка прогноза желтых карточек: {e}")
+            return {}
+
+    def get_match_referee(self, team1_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает информацию о рефери для матча (из последнего матча команды)"""
+        try:
+            query = """
+            SELECT 
+                mf.referee_id, mf.referee_name, mf.referee_yellow_cards, mf.referee_games
+            FROM match_fixtures mf
+            JOIN football_matches fm ON mf.match_id = fm.match_id
+            WHERE (fm.home_team_id = %(team_id)s OR fm.away_team_id = %(team_id)s)
+            AND fm.tournament_id = %(tournament_id)s
+            AND fm.season_id = %(season_id)s
+            AND mf.referee_id IS NOT NULL
+            ORDER BY fm.match_date DESC
+            LIMIT 1
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team_id': team1_id,
+                'tournament_id': tournament_id,
+                'season_id': season_id
+            })
+            
+            if result:
+                return {
+                    'referee_id': result[0][0],
+                    'name': result[0][1],
+                    'yellow_cards': result[0][2],
+                    'games': result[0][3]
+                }
+            return {}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения рефери матча: {e}")
+            return {}
+
+    def get_team_home_away_performance(self, team_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает показатели команды дома и в гостях"""
+        try:
+            query = """
+            SELECT 
+                CASE 
+                    WHEN fm.home_team_id = %(team_id)s THEN 'home'
+                    ELSE 'away'
+                END as match_type,
+                COUNT(*) as matches,
+                AVG(CASE 
+                    WHEN fm.home_team_id = %(team_id)s THEN fm.home_score
+                    ELSE fm.away_score 
+                END) as avg_goals_scored,
+                AVG(CASE 
+                    WHEN fm.home_team_id = %(team_id)s THEN fm.away_score
+                    ELSE fm.home_score 
+                END) as avg_goals_conceded,
+                AVG(CASE 
+                    WHEN fm.home_team_id = %(team_id)s THEN 
+                        CASE WHEN fm.home_score > fm.away_score THEN 1 ELSE 0 END
+                    ELSE 
+                        CASE WHEN fm.away_score > fm.home_score THEN 1 ELSE 0 END
+                END) as win_rate
+            FROM football_matches fm
+            WHERE (fm.home_team_id = %(team_id)s OR fm.away_team_id = %(team_id)s)
+            AND fm.tournament_id = %(tournament_id)s
+            AND fm.season_id = %(season_id)s
+            AND fm.status = 'Ended'
+            GROUP BY match_type
+            """
+            
+            results = self.ch_client.execute(query, {
+                'team_id': team_id,
+                'tournament_id': tournament_id,
+                'season_id': season_id
+            })
+            
+            performance = {'home': {}, 'away': {}}
+            for match_type, matches, avg_scored, avg_conceded, win_rate in results:
+                if match_type == 'home':
+                    performance['home'] = {
+                        'matches': matches,
+                        'avg_goals_scored': avg_scored or 0,
+                        'avg_goals_conceded': avg_conceded or 0,
+                        'win_rate': (win_rate or 0) * 100
+                    }
+                elif match_type == 'away':
+                    performance['away'] = {
+                        'matches': matches,
+                        'avg_goals_scored': avg_scored or 0,
+                        'avg_goals_conceded': avg_conceded or 0,
+                        'win_rate': (win_rate or 0) * 100
+                    }
+            
+            return performance
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения домашних/гостевых показателей: {e}")
+            return {'home': {}, 'away': {}}
+
+    def predict_match_result_with_home_away(self, team1_id: int, team2_id: int, 
+                                          team1_name: str, team2_name: str,
+                                          tournament_id: int, season_id: int) -> Dict[str, Any]:
+        """Прогнозирует результат матча с учетом домашних/гостевых показателей"""
+        try:
+            team1_performance = self.get_team_home_away_performance(team1_id, tournament_id, season_id)
+            team2_performance = self.get_team_home_away_performance(team2_id, tournament_id, season_id)
+            
+            if not team1_performance.get('home') or not team2_performance.get('away'):
+                return {}
+            
+            team1_home = team1_performance['home']
+            team2_away = team2_performance['away']
+            
+            # Прогноз счета на основе домашних/гостевых показателей
+            predicted_home_goals = (team1_home['avg_goals_scored'] + team2_away['avg_goals_conceded']) / 2
+            predicted_away_goals = (team2_away['avg_goals_scored'] + team1_home['avg_goals_conceded']) / 2
+            
+            # Вероятности исходов с учетом домашнего преимущества
+            home_win_prob = (team1_home['win_rate'] + (100 - team2_away['win_rate'])) / 2
+            away_win_prob = (team2_away['win_rate'] + (100 - team1_home['win_rate'])) / 2
+            draw_prob = max(0, 100 - home_win_prob - away_win_prob)
+            
+            # Нормализуем вероятности
+            total_prob = home_win_prob + draw_prob + away_win_prob
+            home_win_prob = (home_win_prob / total_prob) * 100
+            draw_prob = (draw_prob / total_prob) * 100
+            away_win_prob = (away_win_prob / total_prob) * 100
+            
+            return {
+                'predicted_score': f"{predicted_home_goals:.1f}-{predicted_away_goals:.1f}",
+                'probabilities': {
+                    'home_win': round(home_win_prob, 1),
+                    'draw': round(draw_prob, 1),
+                    'away_win': round(away_win_prob, 1)
+                },
+                'home_stats': team1_home,
+                'away_stats': team2_away
+            }
+            
+        except Exception as e:
+            print(f"❌ Ошибка прогноза результата: {e}")
+            return {}
+
+    # СУЩЕСТВУЮЩИЕ МЕТОДЫ АНАЛИЗА (без изменений)
     async def get_players_analysis(self, team1_id: int, team2_id: int, team1_name: str, team2_name: str, 
                               tournament_id: int, season_id: int):
         """Анализ только ключевых игроков"""
-        
         print(f"⭐ АНАЛИЗ ПРОГРЕССА КЛЮЧЕВЫХ ИГРОКОВ:")
         print("=" * 50)
         
         try:
-            # Получаем данные о ключевых игроках
             team1_key_players = self.get_key_players_progress(team1_id, season_id)
             team2_key_players = self.get_key_players_progress(team2_id, season_id)
 
@@ -212,30 +595,6 @@ class AdvancedFootballAnalyzer:
                 
         except Exception as e:
             print(f"❌ Ошибка анализа игроков: {e}")
-            import traceback
-            traceback.print_exc()
-
-    def safe_divide(self, numerator, denominator, default=0.0):
-        """Безопасное деление с обработкой нулей"""
-        if denominator and denominator > 0:
-            return numerator / denominator
-        return default
-
-    def analyze_position_trend(self, position_data: Dict) -> Tuple[str, str]:
-        """Анализирует тренд позиции команды"""
-        if not position_data:
-            return "N/A", ""
-            
-        current_position = position_data.get('position', 0)
-        trend = position_data.get('trend', 'stable')
-        
-        trend_icons = {
-            'up': '🟢 улучшение',
-            'down': '🔴 ухудшение', 
-            'stable': '🟡 стабильно'
-        }
-        
-        return str(current_position), trend_icons.get(trend, '🟡 стабильно')
 
     async def get_match_analysis(self, team1_id: int, team2_id: int, team1_name: str, team2_name: str, 
                                tournament_id: int = 203, season_id: int = 77142):
@@ -265,7 +624,6 @@ class AdvancedFootballAnalyzer:
             # 4. Получаем исторические данные из основных таблиц
             team1_form = self.get_team_form_from_db(team1_id, season_id)
             team2_form = self.get_team_form_from_db(team2_id, season_id)
- 
 
             # Обработка данных из БД
             team1_matches = team1_stats.get('matches', 1)
@@ -306,7 +664,6 @@ class AdvancedFootballAnalyzer:
             else:
                 position_diff = 0
                 class_analysis = "Данные недоступны"
-     
 
             # ОСНОВНАЯ СТАТИСТИКА
             print(f"\n⚽ РЕЗУЛЬТАТИВНОСТЬ (на основе {team1_matches} матчей):")
@@ -346,6 +703,38 @@ class AdvancedFootballAnalyzer:
             print(f"   {team1_name}: {team1_pass_accuracy:.1f}%")
             print(f"   {team2_name}: {team2_pass_accuracy:.1f}%")
 
+            # Получаем данные о кроссах и длинных передачах
+            crosses_longballs_data = self.get_team_crosses_longballs_from_db(team1_id, team2_id, season_id)
+
+            team1_crosses_data = crosses_longballs_data.get(team1_id, {})
+            team2_crosses_data = crosses_longballs_data.get(team2_id, {})
+
+            # АКТИВНОСТЬ ФЛАНГОВ
+            print(f"\n🔄 АКТИВНОСТЬ ФЛАНГОВ:")
+            team1_total_crosses = team1_crosses_data.get('total_crosses', 0)
+            team2_total_crosses = team2_crosses_data.get('total_crosses', 0)
+            team1_accurate_crosses = team1_crosses_data.get('accurate_crosses', 0)
+            team2_accurate_crosses = team2_crosses_data.get('accurate_crosses', 0)
+
+            team1_cross_accuracy = self.safe_divide(team1_accurate_crosses, team1_total_crosses) * 100
+            team2_cross_accuracy = self.safe_divide(team2_accurate_crosses, team2_total_crosses) * 100
+
+            print(f"   {team1_name}: {team1_total_crosses:.1f} кроссов ({team1_cross_accuracy:.1f}% точность)")
+            print(f"   {team2_name}: {team2_total_crosses:.1f} кроссов ({team2_cross_accuracy:.1f}% точность)")
+
+            # ДАЛЬНИЕ АТАКИ
+            print(f"\n🎯 ДАЛЬНИЕ АТАКИ:")
+            team1_total_long_balls = team1_crosses_data.get('total_long_balls', 0)
+            team2_total_long_balls = team2_crosses_data.get('total_long_balls', 0)
+            team1_accurate_long_balls = team1_crosses_data.get('accurate_long_balls', 0)
+            team2_accurate_long_balls = team2_crosses_data.get('accurate_long_balls', 0)
+
+            team1_longball_accuracy = self.safe_divide(team1_accurate_long_balls, team1_total_long_balls) * 100
+            team2_longball_accuracy = self.safe_divide(team2_accurate_long_balls, team2_total_long_balls) * 100
+
+            print(f"   {team1_name}: {team1_total_long_balls:.1f} длинных передач ({team1_longball_accuracy:.1f}% точность)")
+            print(f"   {team2_name}: {team2_total_long_balls:.1f} длинных передач ({team2_longball_accuracy:.1f}% точность)")
+
             # ОБОРОНА
             team1_goals_conceded_pm = self.safe_divide(team1_stats.get('goalsConceded', 0), team1_matches)
             team2_goals_conceded_pm = self.safe_divide(team2_stats.get('goalsConceded', 0), team2_matches)
@@ -353,6 +742,14 @@ class AdvancedFootballAnalyzer:
             print(f"\n🛡️ ОБОРОНА:")
             print(f"   {team1_name}: {team1_goals_conceded_pm:.1f} пропущенных за матч")
             print(f"   {team2_name}: {team2_goals_conceded_pm:.1f} пропущенных за матч")
+
+            # АГРЕССИВНОСТЬ
+            print(f"\n🟨 АГРЕССИВНОСТЬ:")
+            team1_fouls_pm = self.safe_divide(team1_stats.get('fouls', 0), team1_matches)
+            team2_fouls_pm = self.safe_divide(team2_stats.get('fouls', 0), team2_matches)
+
+            print(f"   {team1_name}: {team1_fouls_pm:.1f} фолов за матч")
+            print(f"   {team2_name}: {team2_fouls_pm:.1f} фолов за матч")
 
             # КАЧЕСТВО МОМЕНТОВ
             team1_big_chances_pm = self.safe_divide(team1_stats.get('bigChances', 0), team1_matches)
@@ -364,19 +761,17 @@ class AdvancedFootballAnalyzer:
             print(f"   {team1_name}: {team1_big_chances_pm:.1f} больших шансов ({team1_big_chances_missed_pm:.1f} пропущено)")
             print(f"   {team2_name}: {team2_big_chances_pm:.1f} больших шансов ({team2_big_chances_missed_pm:.1f} пропущено)")
 
-           # АНАЛИЗ ЗОН АТАК
+            # АНАЛИЗ ЗОН АТАК
             print(f"\n🎯 АНАЛИЗ ЗОН АТАК И УЯЗВИМОСТЕЙ:")
 
             team1_total_goals = team1_stats.get('goalsScored', 1)
             team2_total_goals = team2_stats.get('goalsScored', 1)
 
             print(f"\n🏹 {team1_name} АТАКУЕТ:")
-            # РАСЧЕТ ПРОЦЕНТОВ С НОРМАЛИЗАЦИЕЙ
             team1_inside = self.safe_divide(team1_stats.get('goalsFromInsideTheBox', 0), team1_total_goals) * 100
             team1_outside = self.safe_divide(team1_stats.get('goalsFromOutsideTheBox', 0), team1_total_goals) * 100  
             team1_headed = self.safe_divide(team1_stats.get('headedGoals', 0), team1_total_goals) * 100
 
-            # НОРМАЛИЗАЦИЯ ПРОЦЕНТОВ
             total_percent = team1_inside + team1_outside + team1_headed
             if total_percent > 100:
                 team1_inside = (team1_inside / total_percent) * 100
@@ -388,12 +783,10 @@ class AdvancedFootballAnalyzer:
             print(f"   • {team1_headed:.0f}% голов головой")
 
             print(f"\n🏹 {team2_name} АТАКУЕТ:")
-            # ТАКЖЕ ДЛЯ ВТОРОЙ КОМАНДЫ
             team2_inside = self.safe_divide(team2_stats.get('goalsFromInsideTheBox', 0), team2_total_goals) * 100
             team2_outside = self.safe_divide(team2_stats.get('goalsFromOutsideTheBox', 0), team2_total_goals) * 100  
             team2_headed = self.safe_divide(team2_stats.get('headedGoals', 0), team2_total_goals) * 100
 
-            # НОРМАЛИЗАЦИЯ ПРОЦЕНТОВ
             total_percent = team2_inside + team2_outside + team2_headed
             if total_percent > 100:
                 team2_inside = (team2_inside / total_percent) * 100
@@ -404,7 +797,7 @@ class AdvancedFootballAnalyzer:
             print(f"   • {team2_outside:.0f}% голов издали")
             print(f"   • {team2_headed:.0f}% голов головой")
 
-            # ДАННЫЕ ИЗ БД
+            # ФОРМА КОМАНД
             matches_count = len(team1_form) if team1_form else 0
 
             if matches_count == 0:
@@ -415,7 +808,7 @@ class AdvancedFootballAnalyzer:
 
             if team1_form:
                 team1_form_results = [match[6] for match in team1_form]
-                team1_form_display = team1_form_results[::-1]  # Переворачиваем чтобы последний матч был справа
+                team1_form_display = team1_form_results[::-1]
                 form_icons = ''.join(['🟢' if r == 'W' else '🟡' if r == 'D' else '🔴' for r in team1_form_display])
                 print(f"   {team1_name}: {form_icons}")
                 if matches_count > 0:
@@ -483,7 +876,7 @@ class AdvancedFootballAnalyzer:
             else:
                 print(f"   • Статистика появится после 3-х сыгранных туров")
 
-            # ПРОГНОЗЫ
+            # СУЩЕСТВУЮЩИЕ ПРОГНОЗЫ
             total_goals = team1_goals_pm + team2_goals_pm
             
             print(f"\n🏆 ПРОГНОЗ С УЧЕТОМ ПОЗИЦИИ В ТАБЛИЦЕ:")
@@ -534,12 +927,73 @@ class AdvancedFootballAnalyzer:
             for i, insight in enumerate(insights, 1):
                 print(f"   {i}. {insight}")
 
+            # НОВЫЕ УНИКАЛЬНЫЕ ПРОГНОЗЫ (без дублирования)
+            print(f"\n🎲 ЭКСКЛЮЗИВНЫЕ ПРОГНОЗЫ:")
+            print("=" * 40)
+
+            # ПРОГНОЗ ЖЕЛТЫХ КАРТОЧЕК С УЧЕТОМ РЕФЕРИ
+            print(f"\n🟨 АНАЛИЗ ДИСЦИПЛИНЫ С УЧЕТОМ РЕФЕРИ:")
+            try:
+                referee_info = self.get_match_referee(team1_id, tournament_id, season_id)
+                if referee_info and referee_info.get('referee_id'):
+                    yellow_cards_prediction = self.predict_yellow_cards(
+                        team1_id, team2_id, referee_info['referee_id'], 
+                        tournament_id, season_id
+                    )
+                    
+                    if yellow_cards_prediction:
+                        print(f"   👨‍⚖️ Рефери: {yellow_cards_prediction['referee_name']}")
+                        if yellow_cards_prediction['referee_games'] > 0:
+                            print(f"   📊 Среднее у рефери: {yellow_cards_prediction['referee_avg_yellows']} желтых за матч")
+                        print(f"   🎯 Прогноз желтых карточек: {yellow_cards_prediction['predicted_yellow_cards']}")
+                        print(f"   💰 Рекомендация: {yellow_cards_prediction['cards_total_prediction']}")
+                        print(f"   🎯 Уверенность: {yellow_cards_prediction['confidence']}")
+                    else:
+                        print(f"   ℹ️ Данные для прогноза карточек недоступны")
+                else:
+                    print(f"   ℹ️ Информация о рефери недоступна")
+                    
+            except Exception as e:
+                print(f"   ❌ Ошибка прогноза карточек: {e}")
+
+            # ПРОГНОЗ РЕЗУЛЬТАТА С УЧЕТОМ ДОМАШНИХ/ГОСТЕВЫХ ПОКАЗАТЕЛЕЙ
+            print(f"\n🏠🛬 ПРОГНОЗ РЕЗУЛЬТАТА С УЧЕТОМ ДОМАШНЕГО СТАДИОНА:")
+            try:
+                result_prediction = self.predict_match_result_with_home_away(
+                    team1_id, team2_id, team1_name, team2_name, tournament_id, season_id
+                )
+                
+                if result_prediction:
+                    home_stats = result_prediction['home_stats']
+                    away_stats = result_prediction['away_stats']
+                    
+                    print(f"   🏠 {team1_name} дома:")
+                    print(f"      • Побед: {home_stats['win_rate']:.1f}%")
+                    print(f"      • Забивает: {home_stats['avg_goals_scored']:.1f} голов")
+                    print(f"      • Пропускает: {home_stats['avg_goals_conceded']:.1f} голов")
+                    
+                    print(f"   🛬 {team2_name} в гостях:")
+                    print(f"      • Побед: {away_stats['win_rate']:.1f}%")
+                    print(f"      • Забивает: {away_stats['avg_goals_scored']:.1f} голов")
+                    print(f"      • Пропускает: {away_stats['avg_goals_conceded']:.1f} голов")
+                    
+                    print(f"   🎯 Прогноз счета: {result_prediction['predicted_score']}")
+                    
+                    probs = result_prediction['probabilities']
+                    print(f"   📊 Вероятности исходов:")
+                    print(f"      • П1 ({team1_name}): {probs['home_win']}%")
+                    print(f"      • Ничья: {probs['draw']}%")
+                    print(f"      • П2 ({team2_name}): {probs['away_win']}%")
+                    
+            except Exception as e:
+                print(f"   ❌ Ошибка улучшенного прогноза: {e}")
+
         except Exception as e:
             print(f"❌ Ошибка анализа: {e}")
             import traceback
             traceback.print_exc()
 
-    # Методы для работы с БД (остаются без изменений)
+    # СУЩЕСТВУЮЩИЕ ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ (без изменений)
     def get_team_form_from_db(self, team_id: int, season_id: int) -> List:
         try:
             query = """
@@ -562,64 +1016,6 @@ class AdvancedFootballAnalyzer:
             return self.ch_client.execute(query, {'team_id': team_id, 'season_id': season_id})
         except Exception as e:
             print(f"❌ Ошибка получения формы команды {team_id}: {e}")
-            return []
-
-    def get_h2h_from_db(self, team1_id: int, team2_id: int) -> List:
-        """Получает исторические встречи из БД"""
-        try:
-            query = """
-            SELECT 
-                COUNT(*) as total_matches,
-                SUM(CASE 
-                    WHEN fm.home_team_id = %(team1)s AND fm.home_score > fm.away_score THEN 1
-                    WHEN fm.away_team_id = %(team1)s AND fm.away_score > fm.home_score THEN 1
-                    ELSE 0 
-                END) as team1_wins,
-                SUM(CASE 
-                    WHEN fm.home_team_id = %(team2)s AND fm.home_score > fm.away_score THEN 1
-                    WHEN fm.away_team_id = %(team2)s AND fm.away_score > fm.home_score THEN 1
-                    ELSE 0 
-                END) as team2_wins,
-                SUM(CASE WHEN fm.home_score = fm.away_score THEN 1 ELSE 0 END) as draws,
-                AVG(fm.home_score + fm.away_score) as avg_goals
-            FROM football_matches fm
-            WHERE ((fm.home_team_id = %(team1)s AND fm.away_team_id = %(team2)s)
-                OR (fm.home_team_id = %(team2)s AND fm.away_team_id = %(team1)s))
-              AND fm.status = 'Ended'
-            """
-            return self.ch_client.execute(query, {'team1': team1_id, 'team2': team2_id})
-        except Exception as e:
-            print(f"❌ Ошибка получения H2H: {e}")
-            return []
-
-    def get_home_away_stats_from_db(self, team1_id: int, team2_id: int) -> List:
-        """Получает домашние/гостевые показатели из БД"""
-        try:
-            query = """
-            SELECT 
-                team_id, venue, matches, goals, conceded
-            FROM (
-                SELECT home_team_id as team_id, 'home' as venue, COUNT(*) as matches,
-                       AVG(home_score) as goals, AVG(away_score) as conceded
-                FROM football_matches WHERE home_team_id = %(team1)s AND status = 'Ended' GROUP BY home_team_id
-                UNION ALL
-                SELECT away_team_id as team_id, 'away' as venue, COUNT(*) as matches,
-                       AVG(away_score) as goals, AVG(home_score) as conceded  
-                FROM football_matches WHERE away_team_id = %(team1)s AND status = 'Ended' GROUP BY away_team_id
-                UNION ALL
-                SELECT home_team_id as team_id, 'home' as venue, COUNT(*) as matches,
-                       AVG(home_score) as goals, AVG(away_score) as conceded
-                FROM football_matches WHERE home_team_id = %(team2)s AND status = 'Ended' GROUP BY home_team_id
-                UNION ALL
-                SELECT away_team_id as team_id, 'away' as venue, COUNT(*) as matches,
-                       AVG(away_score) as goals, AVG(home_score) as conceded
-                FROM football_matches WHERE away_team_id = %(team2)s AND status = 'Ended' GROUP BY away_team_id
-            )
-            ORDER BY team_id, venue
-            """
-            return self.ch_client.execute(query, {'team1': team1_id, 'team2': team2_id})
-        except Exception as e:
-            print(f"❌ Ошибка получения домашних/гостевых stats: {e}")
             return []
 
     def get_team_all_time_stats(self, team1_id: int, team2_id: int) -> Dict[str, Any]:

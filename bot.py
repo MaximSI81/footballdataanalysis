@@ -185,15 +185,18 @@ SUB_CATEGORIES = {
     },
     "attack": {
         "⚽ Весь раздел 'Атака'": "attack_all",
-        "⚽ Результативность": "attack_goals",
+        "⚽ Результативность": "attack_goals", 
         "🎯 xG и удары": "attack_shots",
-        "📈 Эффективность": "attack_efficiency"
+        "📈 Эффективность": "attack_efficiency",
+        "🔄 Кроссы и фланги": "attack_crosses",        
+        "🎯 Длинные передачи": "attack_longballs",    
     },
     "stats": {
         "🛡️ Весь раздел 'Статистика'": "stats_all",
         "⚖️ Владение мячом": "stats_possession",
-        "📊 Пасы": "stats_passing", 
-        "🟨 Дисциплина": "stats_discipline"
+        "📊 Пасы": "stats_passing",
+        "🟨 Дисциплина": "stats_discipline", 
+        "🟨 Агрессивность": "stats_aggression",
     },
     "form_h2h": {
         "📈 Весь раздел 'Форма'": "form_h2h_all",
@@ -205,7 +208,9 @@ SUB_CATEGORIES = {
         "💰 Весь раздел 'Прогнозы'": "predictions_all",
         "🎯 Вероятности": "predictions_probabilities",
         "💡 Рекомендации": "predictions_recommendations",
-        "🔍 Инсайты": "predictions_insights"
+        "🔍 Инсайты": "predictions_insights",
+        "🟨 Карточки": "predictions_cards",
+        "🏠 Дома/в гостях": "predictions_home_away"
     },
     "players": {
         "⭐ Весь раздел 'Игроки'": "players_all",
@@ -541,18 +546,21 @@ def should_include_main_category(section_line: str, main_category: str) -> bool:
     """Определяет, нужно ли включать секцию для основной категории"""
     category_mapping = {
         "overview": ["🏠", "🛬", "📍", "🏆 ПОЗИЦИЯ", "⚡ БЫСТРЫЕ", "🎯 КЛЮЧЕВЫЕ"],
-        "attack": ["⚽", "🎯 УДАРЫ", "📈 РЕАЛЬНЫЙ xG", "🎯 ЭФФЕКТИВНОСТЬ", "🏹 АТАКУЕТ"],
-        "stats": ["📊 КОНТРОЛЬ", "🔄 ТОЧНОСТЬ", "🛡️ ОБОРОНА", "🎪 КАЧЕСТВО", "🟨 ДИСЦИПЛИНА"],
+        "attack": ["⚽", "🎯 УДАРЫ", "📈 РЕАЛЬНЫЙ xG", "🎯 ЭФФЕКТИВНОСТЬ", 
+                   "🏹 АТАКУЕТ", "🔄 АКТИВНОСТЬ ФЛАНГОВ", "🎯 ДАЛЬНИЕ АТАКИ"],
+        "stats": ["📊 КОНТРОЛЬ", "🔄 ТОЧНОСТЬ", "🛡️ ОБОРОНА", "🎪 КАЧЕСТВО", 
+                  "🟨 ДИСЦИПЛИНА", "🟨 АГРЕССИВНОСТЬ"],
         "form_h2h": ["📈 ФОРМА", "🤝 ВСЕГО МАТЧЕЙ", "📊 ИСТОРИЯ", "📈 СРЕДНИЕ ПОКАЗАТЕЛИ"],
-        "predictions": ["🏆 ПРОГНОЗ", "💰 РЕКОМЕНДАЦИИ", "📈 КЛЮЧЕВЫЕ ИНСАЙТЫ"],
-        "players": ["⭐ АНАЛИЗ ПРОГРЕССА", "🔑 КЛЮЧЕВЫЕ ИГРОКИ"]
+        "predictions": ["🏆 ПРОГНОЗ", "💰 РЕКОМЕНДАЦИИ", "📈 КЛЮЧЕВЫЕ ИНСАЙТЫ", 
+                       "🎲 ЭКСКЛЮЗИВНЫЕ ПРОГНОЗЫ"],
+        "players": ["⭐ АНАЛИЗ ПРОГРЕССА", "🔑 КЛЮЧЕВЫЕ ИГРОКИ"],
     }
     
     markers = category_mapping.get(main_category, [])
     return any(marker in section_line for marker in markers)
 
 def should_include_section(section_line: str, data_type: str) -> bool:
-    """Определяет, нужно ли включать секцию"""
+    """Определяет, нужно ли включать секцию для выбранного типа данных"""
     section_mapping = {
         # Общий обзор
         "overview_summary": ["🏠", "🛬", "📍", "⚽", "🥅", "🎯", "⚖️", "📊", "🟨", "📈"],
@@ -563,11 +571,14 @@ def should_include_section(section_line: str, data_type: str) -> bool:
         "attack_goals": ["⚽", "РЕЗУЛЬТАТИВНОСТЬ", "ГОЛОВ"],
         "attack_shots": ["🎯", "УДАРЫ", "xG"],
         "attack_efficiency": ["ЭФФЕКТИВНОСТЬ", "ТОЧНОСТЬ"],
+        "attack_crosses": ["🔄", "АКТИВНОСТЬ ФЛАНГОВ", "КРОССОВ"],
+        "attack_longballs": ["🎯", "ДАЛЬНИЕ АТАКИ", "ДЛИННЫХ ПЕРЕДАЧ"],
         
         # Статистика
         "stats_possession": ["⚖️", "ВЛАДЕНИЕ", "КОНТРОЛЬ"],
         "stats_passing": ["📊", "ПАСЫ", "ПЕРЕДАЧИ"],
-        "stats_discipline": ["🟨", "ДИСЦИПЛИНА", "ФОЛЫ", "КАРТОЧКИ"],
+        "stats_discipline": ["🟨", "ДИСЦИПЛИНА", "КАРТОЧКИ"],
+        "stats_aggression": ["🟨", "АГРЕССИВНОСТЬ", "ФОЛОВ"],
         
         # Форма и H2H
         "form_recent": ["📅", "ПОСЛЕДНИЕ", "ФОРМА"],
@@ -578,6 +589,8 @@ def should_include_section(section_line: str, data_type: str) -> bool:
         "predictions_probabilities": ["🎯", "ВЕРОЯТНОСТИ", "ПРОГНОЗ"],
         "predictions_recommendations": ["💡", "РЕКОМЕНДАЦИИ"],
         "predictions_insights": ["🔍", "ИНСАЙТЫ", "КЛЮЧЕВЫЕ ИНСАЙТЫ"],
+        "predictions_cards": ["🎲 ЭКСКЛЮЗИВНЫЕ ПРОГНОЗЫ", "🟨 АНАЛИЗ ДИСЦИПЛИНЫ", "Рефери", "Прогноз желтых"],
+        "predictions_home_away": ["🎲 ЭКСКЛЮЗИВНЫЕ ПРОГНОЗЫ", "🏠🛬 ПРОГНОЗ РЕЗУЛЬТАТА", "ДОМАШНЕГО СТАДИОНА", "Вероятности исходов"],
         
         # Игроки
         "players_key": ["⭐ АНАЛИЗ ПРОГРЕССА", "🔑 КЛЮЧЕВЫЕ ИГРОКИ"],
