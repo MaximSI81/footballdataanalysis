@@ -424,24 +424,25 @@ class AdvancedFootballAnalyzer:
             print(f"❌ Ошибка прогноза желтых карточек: {e}")
             return {}
 
-    def get_match_referee(self, team1_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
-        """Получает информацию о рефери для матча (из последнего матча команды)"""
+    def get_match_referee(self, home_team_id: int, away_team_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает информацию о рефери для предстоящего матча"""
         try:
             query = """
             SELECT 
-                mf.referee_id, mf.referee_name, mf.referee_yellow_cards, mf.referee_games
-            FROM match_fixtures mf
-            JOIN football_matches fm ON mf.match_id = fm.match_id
-            WHERE (fm.home_team_id = %(team_id)s OR fm.away_team_id = %(team_id)s)
-            AND fm.tournament_id = %(tournament_id)s
-            AND fm.season_id = %(season_id)s
-            AND mf.referee_id IS NOT NULL
-            ORDER BY fm.match_date DESC
+                referee_id, referee_name, referee_yellow_cards, referee_red_cards,
+                referee_yellow_red_cards, referee_games, referee_country
+            FROM match_fixtures 
+            WHERE home_team_id = %(home_team_id)s 
+                AND away_team_id = %(away_team_id)s
+                AND tournament_id = %(tournament_id)s 
+                AND season_id = %(season_id)s
+            ORDER BY start_timestamp DESC 
             LIMIT 1
             """
             
             result = self.ch_client.execute(query, {
-                'team_id': team1_id,
+                'home_team_id': home_team_id,
+                'away_team_id': away_team_id, 
                 'tournament_id': tournament_id,
                 'season_id': season_id
             })
@@ -451,7 +452,10 @@ class AdvancedFootballAnalyzer:
                     'referee_id': result[0][0],
                     'name': result[0][1],
                     'yellow_cards': result[0][2],
-                    'games': result[0][3]
+                    'red_cards': result[0][3],
+                    'yellow_red_cards': result[0][4],
+                    'games': result[0][5],
+                    'country': result[0][6]
                 }
             return {}
             
@@ -934,7 +938,7 @@ class AdvancedFootballAnalyzer:
             # ПРОГНОЗ ЖЕЛТЫХ КАРТОЧЕК С УЧЕТОМ РЕФЕРИ
             print(f"\n🟨 АНАЛИЗ ДИСЦИПЛИНЫ С УЧЕТОМ РЕФЕРИ:")
             try:
-                referee_info = self.get_match_referee(team1_id, tournament_id, season_id)
+                referee_info = self.get_match_referee(team1_id, team2_id, tournament_id, season_id)
                 if referee_info and referee_info.get('referee_id'):
                     yellow_cards_prediction = self.predict_yellow_cards(
                         team1_id, team2_id, referee_info['referee_id'], 
