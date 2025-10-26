@@ -172,15 +172,17 @@ MAIN_CATEGORIES = {
     "📈 Форма и H2H": "form_h2h",
     "💰 Прогнозы": "predictions",
     "⭐ Игроки": "players",
-    "📋 Полный отчет": "full_report"
+    "📋 Полный отчет": "full_report",
+    "🔙 Назад к выбору команд": "back_to_teams"
 }
 
-# Подкатегории для каждого раздела - ТОЛЬКО ТЕ, ЧТО ЕСТЬ В ВЫВОДЕ
+# Подкатегории для каждого раздела
 SUB_CATEGORIES = {
     "overview": {
         "📊 Весь раздел 'Обзор'": "overview_all",
         "📊 Сводная таблица": "overview_summary",
-        "⚡ Быстрые выводы": "overview_quick_insights"
+        "⚡ Быстрые выводы": "overview_quick_insights",
+        "🔙 Назад к разделам": "back_to_main"
     },
     "attack": {
         "⚽ Весь раздел 'Атака'": "attack_all",
@@ -189,20 +191,23 @@ SUB_CATEGORIES = {
         "📈 Эффективность": "attack_efficiency",
         "🔄 Кроссы и фланги": "attack_crosses",        
         "🎯 Длинные передачи": "attack_longballs",
-        "🎯 Анализ зон атак": "attack_zones"    
+        "🎯 Анализ зон атак": "attack_zones",
+        "🔙 Назад к разделам": "back_to_main"    
     },
     "stats": {
         "🛡️ Весь раздел 'Статистика'": "stats_all",
         "⚖️ Владение мячом": "stats_possession",
         "📊 Пасы": "stats_passing",
         "🟨 Агрессивность": "stats_aggression",
-        "🎪 Качество моментов": "stats_quality"
+        "🎪 Качество моментов": "stats_quality",
+        "🔙 Назад к разделам": "back_to_main"
     },
     "form_h2h": {
         "📈 Весь раздел 'Форма'": "form_h2h_all",
         "📅 Последние матчи": "form_recent",
         "🤝 H2H история": "form_h2h",
-        "🏠 Дома/в гостях": "form_home_away"
+        "🏠 Дома/в гостях": "form_home_away",
+        "🔙 Назад к разделам": "back_to_main"
     },
     "predictions": {
         "💰 Весь раздел 'Прогнозы'": "predictions_all",
@@ -210,18 +215,32 @@ SUB_CATEGORIES = {
         "💡 Рекомендации": "predictions_recommendations",
         "🔍 Инсайты": "predictions_insights",
         "🟨 Карточки": "predictions_cards",
-        "🏠 Дома/в гостях": "predictions_home_away"
+        "🏠 Дома/в гостях": "predictions_home_away",
+        "🔙 Назад к разделам": "back_to_main"
     },
     "players": {
         "⭐ Весь раздел 'Игроки'": "players_all",
-        "👥 Ключевые игроки": "players_key"
+        "👥 Ключевые игроки": "players_key",
+        "🔙 Назад к разделам": "back_to_main"
     }
 }
 
 # Клавиатура с основными командами
 MAIN_KEYBOARD = [
-    ["🏟️ Старт анализа", "❌ Завершить работу"]
+    ["🏟️ Старт анализа", "🔁 Продолжить анализ"],
+    ["❌ Завершить"]
 ]
+
+def create_keyboard_with_finish(buttons_list, include_change_league=False):
+    """Создает клавиатуру с кнопкой завершения и опционально смены лиги"""
+    if include_change_league:
+        buttons_list.append(["🔄 Сменить лигу"])
+    buttons_list.append(["❌ Завершить"])
+    return ReplyKeyboardMarkup(
+        buttons_list,
+        one_time_keyboard=True,
+        resize_keyboard=True
+    )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Начало работы с ботом"""
@@ -230,7 +249,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Я помогу проанализировать предстоящий матч на основе статистики.
 
-Нажмите "🏟️ Старт анализа" для начала анализа матча или "❌ Завершить работу" для выхода.
+Нажмите "🏟️ Старт анализа" для начала анализа матча или "🔁 Продолжить анализ" для возврата к предыдущему матчу.
     """
     
     await update.message.reply_text(
@@ -246,7 +265,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Начало анализа матча"""
-    if update.message.text == "❌ Завершить работу":
+    if update.message.text == "❌ Завершить":
         return await cancel(update, context)
     
     welcome_text = """
@@ -257,44 +276,120 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Создаем клавиатуру с лигами
     league_buttons = [list(LEAGUES.keys())[i:i+2] for i in range(0, len(LEAGUES), 2)]
-    reply_keyboard = league_buttons
     
     await update.message.reply_text(
         welcome_text,
-        reply_markup=ReplyKeyboardMarkup(
-            reply_keyboard, 
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
+        reply_markup=create_keyboard_with_finish(league_buttons)
     )
     
     return SELECT_LEAGUE
+
+async def continue_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Продолжение анализа текущего матча"""
+    if update.message.text == "❌ Завершить":
+        return await cancel(update, context)
+    
+    if 'league' not in context.user_data:
+        await update.message.reply_text("❌ Нет данных о предыдущем анализе. Начните новый анализ.")
+        return await start_analysis(update, context)
+    
+    # Возвращаемся к выбору категорий
+    league = context.user_data['league']
+    home_team = context.user_data['home_team']
+    away_team = context.user_data['away_team']
+    
+    category_buttons = [list(MAIN_CATEGORIES.keys())[i:i+2] for i in range(0, len(MAIN_CATEGORIES), 2)]
+    
+    await update.message.reply_text(
+        f"🔄 ПРОДОЛЖЕНИЕ АНАЛИЗА:\n"
+        f"🏆 Лига: {league}\n"
+        f"🏠 Хозяева: {home_team}\n"
+        f"🛬 Гости: {away_team}\n\n"
+        f"Выберите раздел анализа:",
+        reply_markup=create_keyboard_with_finish(category_buttons)
+    )
+    
+    return SELECT_MAIN_CATEGORY
+
+async def change_league(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Смена лиги"""
+    if update.message.text == "❌ Завершить":
+        return await cancel(update, context)
+    
+    welcome_text = "Выберите новую лигу для анализа:"
+    
+    # Создаем клавиатуру с лигами
+    league_buttons = [list(LEAGUES.keys())[i:i+2] for i in range(0, len(LEAGUES), 2)]
+    
+    await update.message.reply_text(
+        welcome_text,
+        reply_markup=create_keyboard_with_finish(league_buttons)
+    )
+    
+    return SELECT_LEAGUE
+
+async def handle_back_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка навигации Назад"""
+    if update.message.text == "❌ Завершить":
+        return await cancel(update, context)
+    
+    user_data = context.user_data
+    
+    if update.message.text == "🔙 Назад к выбору команд":
+        # Возврат к выбору домашней команды
+        league = user_data['league']
+        teams = user_data['teams']
+        team_buttons = [list(teams.keys())[i:i+3] for i in range(0, len(teams), 3)]
+        
+        await update.message.reply_text(
+            f"🏆 Лига: {league}\n\n"
+            f"Выберите команду хозяев:",
+            reply_markup=create_keyboard_with_finish(team_buttons)
+        )
+        return SELECT_HOME_TEAM
+        
+    elif update.message.text == "🔙 Назад к разделам":
+        # Возврат к выбору основной категории
+        league = user_data['league']
+        home_team = user_data['home_team']
+        away_team = user_data['away_team']
+        
+        category_buttons = [list(MAIN_CATEGORIES.keys())[i:i+2] for i in range(0, len(MAIN_CATEGORIES), 2)]
+        
+        await update.message.reply_text(
+            f"🏆 Лига: {league}\n"
+            f"🏠 Хозяева: {home_team}\n"
+            f"🛬 Гости: {away_team}\n\n"
+            f"Выберите раздел анализа:",
+            reply_markup=create_keyboard_with_finish(category_buttons)
+        )
+        return SELECT_MAIN_CATEGORY
 
 async def select_league(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка выбора лиги"""
     selected_league = update.message.text
     
     if selected_league not in LEAGUES:
-        await update.message.reply_text("❌ Пожалуйста, выберите лигу из списка:")
+        league_buttons = [list(LEAGUES.keys())[i:i+2] for i in range(0, len(LEAGUES), 2)]
+        await update.message.reply_text(
+            "❌ Пожалуйста, выберите лигу из списка:",
+            reply_markup=create_keyboard_with_finish(league_buttons)  # БЕЗ include_change_league
+        )
         return SELECT_LEAGUE
     
-    # Сохраняем данные лиги в контексте
+    # Сохраняем данные лиги
     context.user_data['league'] = selected_league
     context.user_data['tournament_id'] = LEAGUES[selected_league]['id']
-    context.user_data['season_id'] = LEAGUES[selected_league]['season_id']
+    context.user_data['season_id'] = LEAGUES[selected_league]['season_id'] 
     context.user_data['teams'] = LEAGUES[selected_league]['teams']
     
-    # Создаем клавиатуру с командами выбранной лиги
+    # Создаем клавиатуру для выбора домашней команды
     team_buttons = [list(LEAGUES[selected_league]['teams'].keys())[i:i+3] for i in range(0, len(LEAGUES[selected_league]['teams']), 3)]
     
     await update.message.reply_text(
         f"🏆 Лига: {selected_league}\n\n"
         f"Выберите команду хозяев:",
-        reply_markup=ReplyKeyboardMarkup(
-            team_buttons,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
+        reply_markup=create_keyboard_with_finish(team_buttons, include_change_league=True)  # ВКЛЮЧАЕМ кнопку смены лиги
     )
     
     return SELECT_HOME_TEAM
@@ -304,8 +399,22 @@ async def select_home_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
     home_team = update.message.text
     teams = context.user_data['teams']
     
+    if home_team == "❌ Завершить":
+        return await cancel(update, context)
+    
+    # Обработка смены лиги
+    if home_team == "🔄 Сменить лигу":
+        return await change_league(update, context)
+    
     if home_team not in teams:
-        await update.message.reply_text("❌ Пожалуйста, выберите команду из списка:")
+        team_buttons = [list(teams.keys())[i:i+3] for i in range(0, len(teams), 3)]
+        team_buttons.append(["🔄 Сменить лигу"])  # Добавляем кнопку смены лиги
+        team_buttons.append(["❌ Завершить"])
+        
+        await update.message.reply_text(
+            "❌ Пожалуйста, выберите команду из списка:",
+            reply_markup=ReplyKeyboardMarkup(team_buttons, one_time_keyboard=True, resize_keyboard=True)
+        )
         return SELECT_HOME_TEAM
     
     context.user_data['home_team'] = home_team
@@ -314,16 +423,14 @@ async def select_home_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Создаем клавиатуру для гостевой команды (исключаем домашнюю)
     other_teams = [team for team in teams.keys() if team != home_team]
     away_buttons = [other_teams[i:i+2] for i in range(0, len(other_teams), 2)]
+    away_buttons.append(["🔄 Сменить лигу"])  # Добавляем кнопку смены лиги
+    away_buttons.append(["❌ Завершить"])
     
     await update.message.reply_text(
         f"🏆 Лига: {context.user_data['league']}\n"
         f"🏠 Хозяева: {home_team}\n\n"
         f"Выберите команду гостей:",
-        reply_markup=ReplyKeyboardMarkup(
-            away_buttons,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
+        reply_markup=ReplyKeyboardMarkup(away_buttons, one_time_keyboard=True, resize_keyboard=True)
     )
     
     return SELECT_AWAY_TEAM
@@ -333,8 +440,22 @@ async def select_away_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
     away_team = update.message.text
     teams = context.user_data['teams']
     
+    if away_team == "❌ Завершить":
+        return await cancel(update, context)
+    
+    # Обработка смены лиги
+    if away_team == "🔄 Сменить лигу":
+        return await change_league(update, context)
+    
     if away_team not in teams:
-        await update.message.reply_text("❌ Пожалуйста, выберите команду из списка:")
+        away_buttons = [list(teams.keys())[i:i+2] for i in range(0, len(teams), 2)]
+        away_buttons.append(["🔄 Сменить лигу"])  # Добавляем кнопку смены лиги
+        away_buttons.append(["❌ Завершить"])
+        
+        await update.message.reply_text(
+            "❌ Пожалуйста, выберите команду из списка:",
+            reply_markup=ReplyKeyboardMarkup(away_buttons, one_time_keyboard=True, resize_keyboard=True)
+        )
         return SELECT_AWAY_TEAM
     
     context.user_data['away_team'] = away_team
@@ -342,17 +463,14 @@ async def select_away_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Создаем клавиатуру для выбора основной категории
     category_buttons = [list(MAIN_CATEGORIES.keys())[i:i+2] for i in range(0, len(MAIN_CATEGORIES), 2)]
+    category_buttons.append(["❌ Завершить"])
     
     await update.message.reply_text(
         f"🏆 Лига: {context.user_data['league']}\n"
         f"🏠 Хозяева: {context.user_data['home_team']}\n"
         f"🛬 Гости: {away_team}\n\n"
         f"Выберите раздел анализа:",
-        reply_markup=ReplyKeyboardMarkup(
-            category_buttons,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
+        reply_markup=ReplyKeyboardMarkup(category_buttons, one_time_keyboard=True, resize_keyboard=True)
     )
     
     return SELECT_MAIN_CATEGORY
@@ -361,8 +479,22 @@ async def select_main_category(update: Update, context: ContextTypes.DEFAULT_TYP
     """Обработка выбора основной категории"""
     selected_category = update.message.text
     
+    if selected_category == "❌ Завершить":
+        return await cancel(update, context)
+    
+    # Обработка кнопки Назад
+    if selected_category == "🔙 Назад к выбору команд":
+        return await handle_back_navigation(update, context)
+    
+    # Обработка смены лиги
+    if selected_category == "🔄 Сменить лигу":
+        return await change_league(update, context)
+    
     if selected_category not in MAIN_CATEGORIES:
-        await update.message.reply_text("❌ Пожалуйста, выберите раздел из списка:")
+        await update.message.reply_text(
+            "❌ Пожалуйста, выберите раздел из списка:",
+            reply_markup=create_keyboard_with_finish([list(MAIN_CATEGORIES.keys())[i:i+2] for i in range(0, len(MAIN_CATEGORIES), 2)])
+        )
         return SELECT_MAIN_CATEGORY
     
     category_key = MAIN_CATEGORIES[selected_category]
@@ -372,6 +504,14 @@ async def select_main_category(update: Update, context: ContextTypes.DEFAULT_TYP
     if category_key == "full_report":
         return await get_analysis(update, context, "all")
     
+    # Если нажата кнопка Назад
+    if category_key == "back_to_teams":
+        return await handle_back_navigation(update, context)
+    
+    # Если выбрана смена лиги
+    if category_key == "change_league":
+        return await change_league(update, context)
+    
     # Для остальных категорий показываем подкатегории
     sub_categories = SUB_CATEGORIES.get(category_key, {})
     sub_buttons = [list(sub_categories.keys())[i:i+2] for i in range(0, len(sub_categories), 2)]
@@ -379,11 +519,7 @@ async def select_main_category(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(
         f"📂 Раздел: {selected_category}\n\n"
         f"Выберите что показать:",
-        reply_markup=ReplyKeyboardMarkup(
-            sub_buttons,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
+        reply_markup=create_keyboard_with_finish(sub_buttons)
     )
     
     return SELECT_SUB_CATEGORY
@@ -393,13 +529,28 @@ async def select_sub_category(update: Update, context: ContextTypes.DEFAULT_TYPE
     selected_sub = update.message.text
     main_category = context.user_data['selected_main_category']
     
+    if selected_sub == "❌ Завершить":
+        return await cancel(update, context)
+    
+    # Обработка кнопки Назад
+    if selected_sub == "🔙 Назад к разделам":
+        return await handle_back_navigation(update, context)
+    
     sub_categories = SUB_CATEGORIES.get(main_category, {})
     
     if selected_sub not in sub_categories:
-        await update.message.reply_text("❌ Пожалуйста, выберите опцию из списка:")
+        await update.message.reply_text(
+            "❌ Пожалуйста, выберите опцию из списка:",
+            reply_markup=create_keyboard_with_finish([list(sub_categories.keys())[i:i+2] for i in range(0, len(sub_categories), 2)])
+        )
         return SELECT_SUB_CATEGORY
     
     data_type = sub_categories[selected_sub]
+    
+    # Обработка кнопки Назад в подкатегориях
+    if data_type == "back_to_main":
+        return await handle_back_navigation(update, context)
+    
     return await get_analysis(update, context, data_type)
 
 async def get_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE, data_type: str = None):
@@ -570,7 +721,7 @@ def filter_output(output: str, data_type: str) -> str:
             "sections": ["🏠🛬 ПРОГНОЗ РЕЗУЛЬТАТА С УЧЕТОМ ДОМАШНЕГО СТАДИОНА"]
         },
         "form_h2h_all": {
-            "sections": ["📈 ФОРМА", "📊 ИСТОРИЯ ЛИЧНЫХ ВСТРЕЧ", "🤝 ВСЕГО МАТЧЕЙ",
+            "sections": ["📈 ФОРМА", "📊 ИСТОРИЯ ЛИЧНЫх ВСТРЕЧ", "🤝 ВСЕГО МАТЧЕЙ",
                         "⚽ ОБЩАЯ РЕЗУЛЬТАТИВНОСТЬ", "📈 СРЕДНИЕ ПОКАЗАТЕЛИ ЗА МАТЧ",
                         "🏠🛬 ПРОГНОЗ РЕЗУЛЬТАТА С УЧЕТОМ ДОМАШНЕГО СТАДИОНА"]
         },
@@ -586,7 +737,9 @@ def filter_output(output: str, data_type: str) -> str:
             "sections": ["📈 КЛЮЧЕВЫЕ ИНСАЙТЫ"]
         },
         "predictions_cards": {
-            "sections": ["🟨 АНАЛИЗ ДИСЦИПЛИНЫ С УЧЕТОМ РЕФЕРИ", "👨‍⚖️ Рефери:"]
+            "sections": ["🟨 СТАТИСТИКА ДИСЦИПЛИНЫ", "🟨 ДЕТАЛЬНЫЙ АНАЛИЗ КАРТОЧЕК", "👨‍⚖️ Рефери:",
+                        "🎯 Прогноз желтых карточек:", "📊 ИСТОРИЧЕСКИЕ ДАННЫЕ:", "🎯 ФАКТОРЫ ВЛИЯНИЯ:",
+                        "📊 СРЕДНИЕ КАРТОЧКИ ЗА МАТЧ:", "⚖️ АГРЕССИВНОСТЬ:", "🎯 ИНТЕНСИВНОСТЬ:"]
         },
         "predictions_home_away": {
             "sections": ["🏠🛬 ПРОГНОЗ РЕЗУЛЬТАТА С УЧЕТОМ ДОМАШНЕГО СТАДИОНА"]
@@ -594,7 +747,7 @@ def filter_output(output: str, data_type: str) -> str:
         "predictions_all": {
             "sections": ["🏆 ПРОГНОЗ С УЧЕТОМ ПОЗИЦИИ В ТАБЛИЦЕ", "💰 РЕКОМЕНДАЦИИ", 
                         "📈 КЛЮЧЕВЫЕ ИНСАЙТЫ", "🎲 ЭКСКЛЮЗИВНЫЕ ПРОГНОЗЫ",
-                        "🟨 АНАЛИЗ ДИСЦИПЛИНЫ С УЧЕТОМ РЕФЕРИ", "👨‍⚖️ Рефери:",
+                        "🟨 СТАТИСТИКА ДИСЦИПЛИНЫ", "🟨 ДЕТАЛЬНЫЙ АНАЛИЗ КАРТОЧЕК", "👨‍⚖️ Рефери:",
                         "🏠🛬 ПРОГНОЗ РЕЗУЛЬТАТА С УЧЕТОМ ДОМАШНЕГО СТАДИОНА"]
         },
         
@@ -635,7 +788,9 @@ def filter_output(output: str, data_type: str) -> str:
             "ИСТОРИЯ", "ВСЕГО МАТЧЕЙ", "ОБЩАЯ", "СРЕДНИЕ", 
             "ПРОГНОЗ", "РЕКОМЕНДАЦИИ", "ИНСАЙТЫ", "ЭКСКЛЮЗИВНЫЕ", 
             "АНАЛИЗ ДИСЦИПЛИНЫ", "КЛЮЧЕВЫЕ", "АТАКУЕТ", "ПРОТИВОСТОЯНИЯ",
-            "ФЛАНГОВ", "ДАЛЬНИЕ", "ЗОН АТАК", "УЯЗВИМОСТЕЙ", "РЕФЕРИ"
+            "ФЛАНГОВ", "ДАЛЬНИЕ", "ЗОН АТАК", "УЯЗВИМОСТЕЙ", "РЕФЕРИ",
+            "СТАТИСТИКА ДИСЦИПЛИНЫ", "ДЕТАЛЬНЫЙ АНАЛИЗ КАРТОЧЕК", "ИСТОРИЧЕСКИЕ ДАННЫЕ",
+            "ФАКТОРЫ ВЛИЯНИЯ", "СРЕДНИЕ КАРТОЧКИ", "АГРЕССИВНОСТЬ", "ИНТЕНСИВНОСТЬ"
         ]
         
         # Проверяем наличие маркеров секций
@@ -729,7 +884,7 @@ def split_message(text: str, max_length: int = 4000) -> list:
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает главное меню с кнопками"""
     await update.message.reply_text(
-        "Анализ завершен! Хотите проанализировать другой матч?",
+        "Анализ завершен! Хотите проанализировать другой матч или продолжить с текущим?",
         reply_markup=ReplyKeyboardMarkup(
             MAIN_KEYBOARD,
             resize_keyboard=True,
@@ -761,7 +916,8 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', start),
-            MessageHandler(filters.Text(["🏟️ Старт анализа"]), start_analysis)
+            MessageHandler(filters.Text(["🏟️ Старт анализа"]), start_analysis),
+            MessageHandler(filters.Text(["🔁 Продолжить анализ"]), continue_analysis)
         ],
         states={
             SELECT_LEAGUE: [
@@ -782,7 +938,7 @@ def main():
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
-            MessageHandler(filters.Text(["❌ Завершить работу"]), cancel),
+            MessageHandler(filters.Text(["❌ Завершить"]), cancel),
             CommandHandler('start', start)
         ],
     )
@@ -791,7 +947,8 @@ def main():
     
     # Обработчик для главного меню
     application.add_handler(MessageHandler(filters.Text(["🏟️ Старт анализа"]), start_analysis))
-    application.add_handler(MessageHandler(filters.Text(["❌ Завершить работу"]), cancel))
+    application.add_handler(MessageHandler(filters.Text(["🔁 Продолжить анализ"]), continue_analysis))
+    application.add_handler(MessageHandler(filters.Text(["❌ Завершить"]), cancel))
     
     # Запускаем бота
     print("🤖 Бот запущен...")

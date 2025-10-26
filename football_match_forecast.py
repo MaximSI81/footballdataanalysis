@@ -22,6 +22,66 @@ class AdvancedFootballAnalyzer:
         if self.ch_client:
             self.ch_client.disconnect()
 
+    # Словарь дерби
+    DERBY_PAIRS = {
+        # 🇷🇺 Российская Премьер-Лига
+        (2315, 2323): "Московское дерби: Динамо Москва-Спартак Москва",
+        (2320, 2323): "Московское дерби: Локомотив Москва-Спартак Москва", 
+        (2325, 2323): "Московское дерби: ЦСКА Москва-Спартак Москва",
+        (2315, 2320): "Московское дерби: Динамо Москва-Локомотив Москва",
+        (2315, 2325): "Московское дерби: Динамо Москва-ЦСКА Москва",
+        (2320, 2325): "Московское дерби: Локомотив Москва-ЦСКА Москва",
+        (2321, 2323): "Противостояние: Зенит Санкт-Петербург-Спартак Москва",
+        (2321, 2325): "Противостояние: Зенит Санкт-Петербург-ЦСКА Москва",
+        (2321, 2315): "Противостояние: Зенит Санкт-Петербург-Динамо Москва",
+        (34425, 2326): "Южное дерби: Краснодар-Ростов",
+        (34425, 2321): "Противостояние: Краснодар-Зенит Санкт-Петербург",
+        (2326, 2321): "Противостояние: Ростов-Зенит Санкт-Петербург",
+        
+        # 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Английская Премьер-Лига
+        (44, 35): "Северо-западное дерби: Ливерпуль-Манчестер Юнайтед",
+        (42, 35): "Противостояние: Арсенал-Манчестер Юнайтед",
+        (42, 44): "Противостояние: Арсенал-Ливерпуль",
+        (38, 42): "Лондонское дерби: Челси-Арсенал",
+        (38, 37): "Лондонское дерби: Челси-Вест Хэм Юнайтед",
+        (42, 37): "Лондонское дерби: Арсенал-Вест Хэм Юнайтед",
+        (35, 17): "Манчестерское дерби: Манчестер Юнайтед-Манчестер Сити",
+        (33, 38): "Противостояние: Тоттенхэм Хотспур-Челси",
+        (33, 42): "Северо-Лондонское дерби: Тоттенхэм Хотспур-Арсенал",
+        
+        # 🇩🇪 Бундеслига
+        (2672, 2673): "Дерби Германии: Бавария Мюнхен-Боруссия Дортмунд",
+        (2672, 2681): "Южное дерби: Бавария Мюнхен-Байер Леверкузен",
+        (2673, 2681): "Рейнское дерби: Боруссия Дортмунд-Байер Леверкузен",
+        (2674, 2672): "Южное дерби: Айнтрахт Франкфурт-Бавария Мюнхен",
+        (2527, 2673): "Рейнское дерби: Боруссия Мёнхенгладбах-Боруссия Дортмунд",
+        
+        # 🇫🇷 Лига 1
+        (1644, 1641): "Le Classique: Пари Сен-Жермен-Марсель",
+        (1644, 1649): "Противостояние: Пари Сен-Жермен-Лион",
+        (1641, 1649): "Средиземноморское дерби: Марсель-Лион",
+        (1644, 1653): "Богатое дерби: Пари Сен-Жермен-Монако",
+        (1641, 1653): "Прибрежное дерби: Марсель-Монако",
+        
+        # 🇮🇹 Серия А
+        (2697, 2692): "Дерби Италии: Интер-Милан",
+        (2702, 2692): "Столичное дерби: Рома-Милан",
+        (2702, 2697): "Миланское дерби: Рома-Интер",
+        (2714, 2692): "Южное дерби: Наполи-Милан",
+        (2714, 2697): "Противостояние: Наполи-Интер",
+        (2687, 2692): "Туринское дерби: Ювентус-Милан",
+        (2687, 2697): "Противостояние: Ювентус-Интер",
+        (2699, 2702): "Римское дерби: Лацио-Рома",
+        
+        # 🇪🇸 Ла Лига
+        (2817, 2829): "Эль Класико: Барселона-Реал Мадрид",
+        (2836, 2829): "Мадридское дерби: Атлетико Мадрид-Реал Мадрид",
+        (2836, 2817): "Противостояние: Атлетико Мадрид-Барселона",
+        (2828, 2817): "Средиземноморское дерби: Валенсия-Барселона",
+        (2828, 2829): "Противостояние: Валенсия-Реал Мадрид",
+        (2819, 2817): "Противостояние: Вильярреал-Барселона"
+    }
+
     # Существующие методы получения статистики (без изменений)
     def get_team_stats_from_db(self, team_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
         """Получает статистику команды из кэш-таблицы"""
@@ -244,7 +304,324 @@ class AdvancedFootballAnalyzer:
             print(f"❌ Ошибка получения кроссов и длинных передач: {e}")
             return {}
 
-    # НОВЫЕ МЕТОДЫ ДЛЯ УНИКАЛЬНЫХ ПРОГНОЗОВ
+    # НОВЫЕ МЕТОДЫ ДЛЯ УЛУЧШЕННОГО ПРОГНОЗА ЖЕЛТЫХ КАРТОЧЕК
+    def _get_team_yellow_stats(self, team_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает статистику желтых карточек команды"""
+        try:
+            query = """
+            WITH team_matches AS (
+                SELECT match_id, home_team_id as team_id FROM football_matches 
+                WHERE home_team_id = %(team_id)s AND season_id = %(season_id)s AND status = 'Ended'
+                UNION ALL
+                SELECT match_id, away_team_id as team_id FROM football_matches 
+                WHERE away_team_id = %(team_id)s AND season_id = %(season_id)s AND status = 'Ended'
+            )
+            SELECT 
+                COUNT(DISTINCT fc.match_id) as matches_count,
+                COUNT(fc.card_type) as total_yellows,
+                COUNT(fc.card_type) * 1.0 / COUNT(DISTINCT fc.match_id) as avg_yellows_per_match
+            FROM football_cards fc
+            JOIN team_matches tm ON fc.match_id = tm.match_id
+            WHERE fc.card_type = 'yellow'
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team_id': team_id,
+                'season_id': season_id
+            })
+            
+            if result and result[0][0] > 0:
+                matches_count, total_yellows, avg_yellows = result[0]
+                return {
+                    'matches_count': matches_count,
+                    'total_yellows': total_yellows,
+                    'avg_yellows': round(avg_yellows, 2)
+                }
+            return {'matches_count': 0, 'total_yellows': 0, 'avg_yellows': 2.0}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики карточек команды {team_id}: {e}")
+            return {'matches_count': 0, 'total_yellows': 0, 'avg_yellows': 2.0}
+
+    def _get_team_home_away_yellow_stats(self, team_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает домашние/гостевые показатели карточек"""
+        try:
+            query = """
+            SELECT 
+                CASE 
+                    WHEN fm.home_team_id = %(team_id)s THEN 'home'
+                    ELSE 'away'
+                END as venue,
+                COUNT(DISTINCT fc.match_id) as matches_count,
+                COUNT(fc.card_type) as total_yellows,
+                COUNT(fc.card_type) * 1.0 / COUNT(DISTINCT fc.match_id) as avg_yellows
+            FROM football_cards fc
+            JOIN football_matches fm ON fc.match_id = fm.match_id
+            WHERE fc.card_type = 'yellow'
+                AND (fm.home_team_id = %(team_id)s OR fm.away_team_id = %(team_id)s)
+                AND fm.season_id = %(season_id)s
+                AND fm.status = 'Ended'
+            GROUP BY venue
+            """
+            
+            results = self.ch_client.execute(query, {
+                'team_id': team_id,
+                'season_id': season_id
+            })
+            
+            stats = {'home': {'avg_yellows': 2.0}, 'away': {'avg_yellows': 2.0}}
+            
+            for venue, matches_count, total_yellows, avg_yellows in results:
+                if venue == 'home':
+                    stats['home'] = {
+                        'matches_count': matches_count,
+                        'total_yellows': total_yellows,
+                        'avg_yellows': round(avg_yellows, 2)
+                    }
+                elif venue == 'away':
+                    stats['away'] = {
+                        'matches_count': matches_count,
+                        'total_yellows': total_yellows,
+                        'avg_yellows': round(avg_yellows, 2)
+                    }
+            
+            return stats
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения домашних/гостевых карточек команды {team_id}: {e}")
+            return {'home': {'avg_yellows': 2.0}, 'away': {'avg_yellows': 2.0}}
+
+    def _get_referee_yellow_stats(self, referee_id: int, tournament_id: int) -> Dict[str, Any]:
+        """Получает статистику желтых карточек рефери"""
+        try:
+            query = """
+            SELECT 
+                referee_name,
+                referee_yellow_cards,
+                referee_games,
+                referee_yellow_cards * 1.0 / NULLIF(referee_games, 0) as avg_yellows
+            FROM match_fixtures 
+            WHERE referee_id = %(referee_id)s
+                AND tournament_id = %(tournament_id)s
+                AND referee_games > 0
+            ORDER BY start_timestamp DESC
+            LIMIT 1
+            """
+            
+            result = self.ch_client.execute(query, {
+                'referee_id': referee_id,
+                'tournament_id': tournament_id
+            })
+            
+            if result:
+                name, total_yellows, games, avg_yellows = result[0]
+                return {
+                    'name': name,
+                    'total_yellows': total_yellows,
+                    'games': games,
+                    'avg_yellows': round(avg_yellows, 2)
+                }
+            return {'name': 'Неизвестно', 'total_yellows': 0, 'games': 0, 'avg_yellows': 3.0}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики рефери {referee_id}: {e}")
+            return {'name': 'Неизвестно', 'total_yellows': 0, 'games': 0, 'avg_yellows': 3.0}
+
+    def _get_h2h_yellow_stats(self, team1_id: int, team2_id: int) -> Dict[str, Any]:
+        """Получает историю желтых карточек в личных встречах"""
+        try:
+            query = """
+            SELECT 
+                COUNT(DISTINCT fm.match_id) as matches_count,
+                COUNT(fc.card_type) as total_yellows,
+                COUNT(fc.card_type) * 1.0 / COUNT(DISTINCT fm.match_id) as avg_yellows
+            FROM football_matches fm
+            JOIN football_cards fc ON fm.match_id = fc.match_id
+            WHERE ((fm.home_team_id = %(team1)s AND fm.away_team_id = %(team2)s)
+                OR (fm.home_team_id = %(team2)s AND fm.away_team_id = %(team1)s))
+                AND fm.status = 'Ended'
+                AND fc.card_type = 'yellow'
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team1': team1_id,
+                'team2': team2_id
+            })
+            
+            if result and result[0][0] > 0:
+                matches_count, total_yellows, avg_yellows = result[0]
+                return {
+                    'matches_count': matches_count,
+                    'total_yellows': total_yellows,
+                    'avg_yellows': round(avg_yellows, 2)
+                }
+            return {'matches_count': 0, 'total_yellows': 0, 'avg_yellows': 3.0}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения H2H статистики карточек: {e}")
+            return {'matches_count': 0, 'total_yellows': 0, 'avg_yellows': 3.0}
+
+    def _get_team_fouls_stats(self, team_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает статистику фолов команды"""
+        try:
+            query = """
+            SELECT 
+                AVG(fouls) as avg_fouls
+            FROM football_match_stats 
+            WHERE team_id = %(team_id)s
+                AND match_id IN (
+                    SELECT match_id FROM football_matches 
+                    WHERE season_id = %(season_id)s AND status = 'Ended'
+                )
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team_id': team_id,
+                'season_id': season_id
+            })
+            
+            if result and result[0][0] is not None:
+                return {'avg_fouls': round(result[0][0], 2)}
+            return {'avg_fouls': 12.0}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики фолов команды {team_id}: {e}")
+            return {'avg_fouls': 12.0}
+
+    def _get_position_diff(self, team1_id: int, team2_id: int, tournament_id: int, season_id: int) -> int:
+        """Получает разницу позиций в таблице"""
+        try:
+            query = """
+            SELECT 
+                t1.position as pos1,
+                t2.position as pos2
+            FROM team_positions_cache t1
+            CROSS JOIN team_positions_cache t2
+            WHERE t1.team_id = %(team1)s 
+                AND t2.team_id = %(team2)s
+                AND t1.tournament_id = %(tournament_id)s
+                AND t2.tournament_id = %(tournament_id)s
+                AND t1.season_id = %(season_id)s
+                AND t2.season_id = %(season_id)s
+            ORDER BY t1.updated_at DESC, t2.updated_at DESC
+            LIMIT 1
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team1': team1_id,
+                'team2': team2_id,
+                'tournament_id': tournament_id,
+                'season_id': season_id
+            })
+            
+            if result:
+                pos1, pos2 = result[0]
+                return abs(pos1 - pos2) if pos1 and pos2 else 8
+            return 8
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения разницы позиций: {e}")
+            return 8
+
+    def _is_derby(self, team1_id: int, team2_id: int) -> Tuple[bool, str]:
+        """Проверяет, является ли матч дерби"""
+        derby_key1 = (team1_id, team2_id)
+        derby_key2 = (team2_id, team1_id)
+        
+        if derby_key1 in self.DERBY_PAIRS:
+            return True, self.DERBY_PAIRS[derby_key1]
+        elif derby_key2 in self.DERBY_PAIRS:
+            return True, self.DERBY_PAIRS[derby_key2]
+        
+        return False, ""
+
+    def predict_yellow_cards(self, team1_id: int, team2_id: int, referee_id: int, 
+                            tournament_id: int, season_id: int) -> Dict[str, Any]:
+        """УЛУЧШЕННЫЙ прогноз желтых карточек с реальными данными"""
+        try:
+            # 1. Получаем данные по командам
+            team1_home_away = self._get_team_home_away_yellow_stats(team1_id, season_id)
+            team2_home_away = self._get_team_home_away_yellow_stats(team2_id, season_id)
+            
+            team1_fouls = self._get_team_fouls_stats(team1_id, season_id)
+            team2_fouls = self._get_team_fouls_stats(team2_id, season_id)
+            
+            # 2. Получаем данные по рефери
+            referee_stats = self._get_referee_yellow_stats(referee_id, tournament_id)
+            
+            # 3. Получаем контекстные данные
+            h2h_stats = self._get_h2h_yellow_stats(team1_id, team2_id)
+            position_diff = self._get_position_diff(team1_id, team2_id, tournament_id, season_id)
+            is_derby, derby_name = self._is_derby(team1_id, team2_id)
+            
+            # 4. Расчет прогноза (40% команды + 40% рефери + 20% контекст)
+            team1_home_yellows = team1_home_away['home']['avg_yellows']
+            team2_away_yellows = team2_home_away['away']['avg_yellows']
+            
+            team_component = (team1_home_yellows + team2_away_yellows) / 2 * 0.4
+            referee_component = referee_stats['avg_yellows'] * 0.4
+            context_component = h2h_stats['avg_yellows'] * 0.2
+            
+            # 5. Корректировки на контекст
+            context_adjustment = 0.0
+            if is_derby:
+                context_adjustment += 0.3
+            if position_diff <= 3:
+                context_adjustment += 0.2
+            elif position_diff >= 8:
+                context_adjustment += 0.1
+            
+            final_prediction = team_component + referee_component + context_component + context_adjustment
+            
+            # 6. Определяем рекомендацию
+            if final_prediction < 3.2:
+                cards_total = "ТМ 4.5"
+                confidence = "🔴 Высокая"
+            elif final_prediction < 3.8:
+                cards_total = "ТМ 4.5"
+                confidence = "🟡 Средняя"
+            elif final_prediction < 4.4:
+                cards_total = "ТБ 4.5"
+                confidence = "🟡 Средняя"
+            else:
+                cards_total = "ТБ 4.5"
+                confidence = "🔴 Высокая"
+            
+            # 7. Индикаторы агрессивности
+            def get_aggression_indicator(avg_yellows):
+                if avg_yellows < 3.0:
+                    return "🟢"
+                elif avg_yellows < 4.0:
+                    return "🟡"
+                else:
+                    return "🔴"
+            
+            return {
+                'predicted_yellow_cards': round(final_prediction, 2),
+                'team1_home_yellows': team1_home_yellows,
+                'team2_away_yellows': team2_away_yellows,
+                'referee_avg_yellows': referee_stats['avg_yellows'],
+                'referee_name': referee_stats['name'],
+                'referee_games': referee_stats['games'],
+                'h2h_avg_yellows': h2h_stats['avg_yellows'],
+                'position_diff': position_diff,
+                'team1_avg_fouls': team1_fouls['avg_fouls'],
+                'team2_avg_fouls': team2_fouls['avg_fouls'],
+                'is_derby': is_derby,
+                'derby_name': derby_name,
+                'cards_total_prediction': cards_total,
+                'confidence': confidence,
+                'team1_aggression': get_aggression_indicator(team1_home_yellows),
+                'team2_aggression': get_aggression_indicator(team2_away_yellows),
+                'referee_aggression': get_aggression_indicator(referee_stats['avg_yellows']),
+                'h2h_aggression': get_aggression_indicator(h2h_stats['avg_yellows'])
+            }
+            
+        except Exception as e:
+            print(f"❌ Ошибка улучшенного прогноза желтых карточек: {e}")
+            return {}
+
+    # СУЩЕСТВУЮЩИЕ МЕТОДЫ (без изменений)
     def get_referee_stats_from_db(self, referee_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
         """Получает статистику рефери из БД"""
         try:
@@ -281,147 +658,360 @@ class AdvancedFootballAnalyzer:
             print(f"❌ Ошибка получения статистики рефери: {e}")
             return {}
 
-    def get_team_discipline_stats(self, team_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
-        """Получает статистику дисциплины команды"""
+        # ... предыдущие методы без изменений ...
+
+    # НОВЫЕ МЕТОДЫ ДЛЯ УЛУЧШЕННОГО ПРОГНОЗА ЖЕЛТЫХ КАРТОЧЕК
+    def _get_team_yellow_stats(self, team_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает статистику желтых карточек команды"""
         try:
             query = """
-            SELECT 
-                AVG(fouls) as avg_fouls,
-                AVG(yellow_cards) as avg_yellow_cards,
-                COUNT(*) as matches
-            FROM football_match_stats 
-            WHERE team_id = %(team_id)s
-            AND match_id IN (
-                SELECT match_id FROM football_matches 
-                WHERE tournament_id = %(tournament_id)s 
-                AND season_id = %(season_id)s
-                AND status = 'Ended'
+            WITH team_matches AS (
+                SELECT match_id, home_team_id as team_id FROM football_matches 
+                WHERE home_team_id = %(team_id)s AND season_id = %(season_id)s AND status = 'Ended'
+                UNION ALL
+                SELECT match_id, away_team_id as team_id FROM football_matches 
+                WHERE away_team_id = %(team_id)s AND season_id = %(season_id)s AND status = 'Ended'
             )
+            SELECT 
+                COUNT(DISTINCT fc.match_id) as matches_count,
+                COUNT(fc.card_type) as total_yellows,
+                COUNT(fc.card_type) * 1.0 / COUNT(DISTINCT fc.match_id) as avg_yellows_per_match
+            FROM football_cards fc
+            JOIN team_matches tm ON fc.match_id = tm.match_id
+            WHERE fc.card_type = 'yellow'
             """
             
             result = self.ch_client.execute(query, {
                 'team_id': team_id,
-                'tournament_id': tournament_id,
                 'season_id': season_id
             })
             
-            if result and result[0][2] > 0:
+            if result and result[0][0] > 0:
+                matches_count, total_yellows, avg_yellows = result[0]
                 return {
-                    'avg_fouls': result[0][0] or 0,
-                    'avg_yellow_cards': result[0][1] or 0,
-                    'matches': result[0][2]
+                    'matches_count': matches_count,
+                    'total_yellows': total_yellows,
+                    'avg_yellows': round(avg_yellows, 2)
                 }
-            return {}
+            return {'matches_count': 0, 'total_yellows': 0, 'avg_yellows': 2.0}
             
         except Exception as e:
-            print(f"❌ Ошибка получения статистики дисциплины: {e}")
-            return {}
+            print(f"❌ Ошибка получения статистики карточек команды {team_id}: {e}")
+            return {'matches_count': 0, 'total_yellows': 0, 'avg_yellows': 2.0}
 
-    def get_home_away_discipline_stats(self, team_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
-        """Получает статистику дисциплины команды дома и в гостях"""
+    def _get_team_home_away_yellow_stats(self, team_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает домашние/гостевые показатели карточек"""
         try:
             query = """
             SELECT 
-                team_type,
-                AVG(fouls) as avg_fouls,
-                AVG(yellow_cards) as avg_yellow_cards,
-                COUNT(*) as matches
-            FROM football_match_stats 
-            WHERE team_id = %(team_id)s
-            AND match_id IN (
-                SELECT match_id FROM football_matches 
-                WHERE tournament_id = %(tournament_id)s 
-                AND season_id = %(season_id)s
-                AND status = 'Ended'
-            )
-            GROUP BY team_type
+                CASE 
+                    WHEN fm.home_team_id = %(team_id)s THEN 'home'
+                    ELSE 'away'
+                END as venue,
+                COUNT(DISTINCT fc.match_id) as matches_count,
+                COUNT(fc.card_type) as total_yellows,
+                COUNT(fc.card_type) * 1.0 / COUNT(DISTINCT fc.match_id) as avg_yellows
+            FROM football_cards fc
+            JOIN football_matches fm ON fc.match_id = fm.match_id
+            WHERE fc.card_type = 'yellow'
+                AND (fm.home_team_id = %(team_id)s OR fm.away_team_id = %(team_id)s)
+                AND fm.season_id = %(season_id)s
+                AND fm.status = 'Ended'
+            GROUP BY venue
             """
             
             results = self.ch_client.execute(query, {
                 'team_id': team_id,
-                'tournament_id': tournament_id,
                 'season_id': season_id
             })
             
-            stats = {'home': {}, 'away': {}}
-            for team_type, avg_fouls, avg_yellow_cards, matches in results:
-                if team_type == 'home':
+            stats = {'home': {'avg_yellows': 2.0}, 'away': {'avg_yellows': 2.0}}
+            
+            for venue, matches_count, total_yellows, avg_yellows in results:
+                if venue == 'home':
                     stats['home'] = {
-                        'avg_fouls': avg_fouls or 0,
-                        'avg_yellow_cards': avg_yellow_cards or 0,
-                        'matches': matches
+                        'matches_count': matches_count,
+                        'total_yellows': total_yellows,
+                        'avg_yellows': round(avg_yellows, 2)
                     }
-                elif team_type == 'away':
+                elif venue == 'away':
                     stats['away'] = {
-                        'avg_fouls': avg_fouls or 0,
-                        'avg_yellow_cards': avg_yellow_cards or 0,
-                        'matches': matches
+                        'matches_count': matches_count,
+                        'total_yellows': total_yellows,
+                        'avg_yellows': round(avg_yellows, 2)
                     }
             
             return stats
             
         except Exception as e:
-            print(f"❌ Ошибка получения домашней/гостевой статистики дисциплины: {e}")
-            return {'home': {}, 'away': {}}
+            print(f"❌ Ошибка получения домашних/гостевых карточек команды {team_id}: {e}")
+            return {'home': {'avg_yellows': 2.0}, 'away': {'avg_yellows': 2.0}}
+
+    def _get_referee_yellow_stats(self, referee_id: int, tournament_id: int) -> Dict[str, Any]:
+        """Получает статистику желтых карточек рефери"""
+        try:
+            query = """
+            SELECT 
+                referee_name,
+                referee_yellow_cards,
+                referee_games,
+                referee_yellow_cards * 1.0 / NULLIF(referee_games, 0) as avg_yellows
+            FROM match_fixtures 
+            WHERE referee_id = %(referee_id)s
+                AND tournament_id = %(tournament_id)s
+                AND referee_games > 0
+            ORDER BY start_timestamp DESC
+            LIMIT 1
+            """
+            
+            result = self.ch_client.execute(query, {
+                'referee_id': referee_id,
+                'tournament_id': tournament_id
+            })
+            
+            if result:
+                name, total_yellows, games, avg_yellows = result[0]
+                return {
+                    'name': name,
+                    'total_yellows': total_yellows,
+                    'games': games,
+                    'avg_yellows': round(avg_yellows, 2)
+                }
+            return {'name': 'Неизвестно', 'total_yellows': 0, 'games': 0, 'avg_yellows': 3.0}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики рефери {referee_id}: {e}")
+            return {'name': 'Неизвестно', 'total_yellows': 0, 'games': 0, 'avg_yellows': 3.0}
+
+    def _get_h2h_yellow_stats(self, team1_id: int, team2_id: int) -> Dict[str, Any]:
+        """Получает историю желтых карточек в личных встречах"""
+        try:
+            query = """
+            SELECT 
+                COUNT(DISTINCT fm.match_id) as matches_count,
+                COUNT(fc.card_type) as total_yellows,
+                COUNT(fc.card_type) * 1.0 / COUNT(DISTINCT fm.match_id) as avg_yellows
+            FROM football_matches fm
+            JOIN football_cards fc ON fm.match_id = fc.match_id
+            WHERE ((fm.home_team_id = %(team1)s AND fm.away_team_id = %(team2)s)
+                OR (fm.home_team_id = %(team2)s AND fm.away_team_id = %(team1)s))
+                AND fm.status = 'Ended'
+                AND fc.card_type = 'yellow'
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team1': team1_id,
+                'team2': team2_id
+            })
+            
+            if result and result[0][0] > 0:
+                matches_count, total_yellows, avg_yellows = result[0]
+                return {
+                    'matches_count': matches_count,
+                    'total_yellows': total_yellows,
+                    'avg_yellows': round(avg_yellows, 2)
+                }
+            return {'matches_count': 0, 'total_yellows': 0, 'avg_yellows': 3.0}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения H2H статистики карточек: {e}")
+            return {'matches_count': 0, 'total_yellows': 0, 'avg_yellows': 3.0}
+
+    def _get_team_fouls_stats(self, team_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает статистику фолов команды"""
+        try:
+            query = """
+            SELECT 
+                AVG(fouls) as avg_fouls
+            FROM football_match_stats 
+            WHERE team_id = %(team_id)s
+                AND match_id IN (
+                    SELECT match_id FROM football_matches 
+                    WHERE season_id = %(season_id)s AND status = 'Ended'
+                )
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team_id': team_id,
+                'season_id': season_id
+            })
+            
+            if result and result[0][0] is not None:
+                return {'avg_fouls': round(result[0][0], 2)}
+            return {'avg_fouls': 12.0}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики фолов команды {team_id}: {e}")
+            return {'avg_fouls': 12.0}
+
+    def _get_position_diff(self, team1_id: int, team2_id: int, tournament_id: int, season_id: int) -> int:
+        """Получает разницу позиций в таблице"""
+        try:
+            query = """
+            SELECT 
+                t1.position as pos1,
+                t2.position as pos2
+            FROM team_positions_cache t1
+            CROSS JOIN team_positions_cache t2
+            WHERE t1.team_id = %(team1)s 
+                AND t2.team_id = %(team2)s
+                AND t1.tournament_id = %(tournament_id)s
+                AND t2.tournament_id = %(tournament_id)s
+                AND t1.season_id = %(season_id)s
+                AND t2.season_id = %(season_id)s
+            ORDER BY t1.updated_at DESC, t2.updated_at DESC
+            LIMIT 1
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team1': team1_id,
+                'team2': team2_id,
+                'tournament_id': tournament_id,
+                'season_id': season_id
+            })
+            
+            if result:
+                pos1, pos2 = result[0]
+                return abs(pos1 - pos2) if pos1 and pos2 else 8
+            return 8
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения разницы позиций: {e}")
+            return 8
+
+    def _is_derby(self, team1_id: int, team2_id: int) -> Tuple[bool, str]:
+        """Проверяет, является ли матч дерби"""
+        derby_key1 = (team1_id, team2_id)
+        derby_key2 = (team2_id, team1_id)
+        
+        if derby_key1 in self.DERBY_PAIRS:
+            return True, self.DERBY_PAIRS[derby_key1]
+        elif derby_key2 in self.DERBY_PAIRS:
+            return True, self.DERBY_PAIRS[derby_key2]
+        
+        return False, ""
 
     def predict_yellow_cards(self, team1_id: int, team2_id: int, referee_id: int, 
                             tournament_id: int, season_id: int) -> Dict[str, Any]:
-        """Прогнозирует количество желтых карточек в матче"""
+        """УЛУЧШЕННЫЙ прогноз желтых карточек с реальными данными"""
         try:
-            # Получаем статистику рефери
-            referee_stats = self.get_referee_stats_from_db(referee_id, tournament_id, season_id)
+            # 1. Получаем данные по командам
+            team1_home_away = self._get_team_home_away_yellow_stats(team1_id, season_id)
+            team2_home_away = self._get_team_home_away_yellow_stats(team2_id, season_id)
             
-            # Получаем домашнюю/гостевую статистику
-            team1_home_away = self.get_home_away_discipline_stats(team1_id, tournament_id, season_id)
-            team2_home_away = self.get_home_away_discipline_stats(team2_id, tournament_id, season_id)
+            team1_fouls = self._get_team_fouls_stats(team1_id, season_id)
+            team2_fouls = self._get_team_fouls_stats(team2_id, season_id)
             
-            # Берем домашние показатели для первой команды и гостевые для второй
-            team1_home_yellows = team1_home_away.get('home', {}).get('avg_yellow_cards', 0)
-            team2_away_yellows = team2_home_away.get('away', {}).get('avg_yellow_cards', 0)
+            # 2. Получаем данные по рефери
+            referee_stats = self._get_referee_yellow_stats(referee_id, tournament_id)
             
-            # Корректировка на строгость рефери
-            referee_avg_yellows = 0
-            if referee_stats and referee_stats.get('games', 0) > 0:
-                referee_avg_yellows = referee_stats['yellow_cards'] / referee_stats['games']
+            # 3. Получаем контекстные данные
+            h2h_stats = self._get_h2h_yellow_stats(team1_id, team2_id)
+            position_diff = self._get_position_diff(team1_id, team2_id, tournament_id, season_id)
+            is_derby, derby_name = self._is_derby(team1_id, team2_id)
             
-            # Расчет прогноза
-            base_prediction = (team1_home_yellows + team2_away_yellows) / 2
+            # 4. Расчет прогноза (40% команды + 40% рефери + 20% контекст)
+            team1_home_yellows = team1_home_away['home']['avg_yellows']
+            team2_away_yellows = team2_home_away['away']['avg_yellows']
             
-            # Корректировка на рефери (если есть данные)
-            if referee_avg_yellows > 0:
-                league_avg_yellows = 3.0  # среднее по лиге
-                referee_factor = (referee_avg_yellows - league_avg_yellows) * 0.3
-                final_prediction = max(0, base_prediction + referee_factor)
+            team_component = (team1_home_yellows + team2_away_yellows) / 2 * 0.4
+            referee_component = referee_stats['avg_yellows'] * 0.4
+            context_component = h2h_stats['avg_yellows'] * 0.2
+            
+            # 5. Корректировки на контекст
+            context_adjustment = 0.0
+            if is_derby:
+                context_adjustment += 0.3
+            if position_diff <= 3:
+                context_adjustment += 0.2
+            elif position_diff >= 8:
+                context_adjustment += 0.1
+            
+            final_prediction = team_component + referee_component + context_component + context_adjustment
+            
+            # 6. Определяем рекомендацию
+            if final_prediction < 3.2:
+                cards_total = "ТМ 4.5"
+                confidence = "🔴 Высокая"
+            elif final_prediction < 3.8:
+                cards_total = "ТМ 4.5"
+                confidence = "🟡 Средняя"
+            elif final_prediction < 4.4:
+                cards_total = "ТБ 4.5"
+                confidence = "🟡 Средняя"
             else:
-                final_prediction = base_prediction
-            
-            # Определяем тотал
-            if final_prediction > 4.5:
                 cards_total = "ТБ 4.5"
                 confidence = "🔴 Высокая"
-            elif final_prediction > 3.5:
-                cards_total = "ТБ 4.5" 
-                confidence = "🟡 Средняя"
-            elif final_prediction > 2.5:
-                cards_total = "ТМ 4.5"
-                confidence = "🟢 Низкая"
-            else:
-                cards_total = "ТМ 4.5"
-                confidence = "🔴 Высокая"
+            
+            # 7. Индикаторы агрессивности
+            def get_aggression_indicator(avg_yellows):
+                if avg_yellows < 3.0:
+                    return "🟢"
+                elif avg_yellows < 4.0:
+                    return "🟡"
+                else:
+                    return "🔴"
             
             return {
-                'predicted_yellow_cards': round(final_prediction, 1),
-                'team1_home_yellows': round(team1_home_yellows, 1),
-                'team2_away_yellows': round(team2_away_yellows, 1),
-                'referee_avg_yellows': round(referee_avg_yellows, 1) if referee_avg_yellows > 0 else "N/A",
+                'predicted_yellow_cards': round(final_prediction, 2),
+                'team1_home_yellows': team1_home_yellows,
+                'team2_away_yellows': team2_away_yellows,
+                'referee_avg_yellows': referee_stats['avg_yellows'],
+                'referee_name': referee_stats['name'],
+                'referee_games': referee_stats['games'],
+                'h2h_avg_yellows': h2h_stats['avg_yellows'],
+                'position_diff': position_diff,
+                'team1_avg_fouls': team1_fouls['avg_fouls'],
+                'team2_avg_fouls': team2_fouls['avg_fouls'],
+                'is_derby': is_derby,
+                'derby_name': derby_name,
                 'cards_total_prediction': cards_total,
                 'confidence': confidence,
-                'referee_name': referee_stats.get('name', 'Неизвестно'),
-                'referee_games': referee_stats.get('games', 0)
+                'team1_aggression': get_aggression_indicator(team1_home_yellows),
+                'team2_aggression': get_aggression_indicator(team2_away_yellows),
+                'referee_aggression': get_aggression_indicator(referee_stats['avg_yellows']),
+                'h2h_aggression': get_aggression_indicator(h2h_stats['avg_yellows'])
             }
             
         except Exception as e:
-            print(f"❌ Ошибка прогноза желтых карточек: {e}")
+            print(f"❌ Ошибка улучшенного прогноза желтых карточек: {e}")
+            return {}
+
+    # СУЩЕСТВУЮЩИЕ МЕТОДЫ БЕЗ ИЗМЕНЕНИЙ
+    def get_referee_stats_from_db(self, referee_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает статистику рефери из БД"""
+        try:
+            query = """
+            SELECT 
+                referee_id, referee_name, referee_yellow_cards, referee_red_cards,
+                referee_yellow_red_cards, referee_games, referee_country
+            FROM match_fixtures 
+            WHERE referee_id = %(referee_id)s
+            AND tournament_id = %(tournament_id)s
+            AND season_id = %(season_id)s
+            LIMIT 1
+            """
+            
+            result = self.ch_client.execute(query, {
+                'referee_id': referee_id,
+                'tournament_id': tournament_id,
+                'season_id': season_id
+            })
+            
+            if result:
+                return {
+                    'referee_id': result[0][0],
+                    'name': result[0][1],
+                    'yellow_cards': result[0][2],
+                    'red_cards': result[0][3],
+                    'yellow_red_cards': result[0][4],
+                    'games': result[0][5],
+                    'country': result[0][6]
+                }
+            return {}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики рефери: {e}")
             return {}
 
     def get_match_referee(self, home_team_id: int, away_team_id: int, tournament_id: int, season_id: int) -> Dict[str, Any]:
@@ -568,7 +1158,7 @@ class AdvancedFootballAnalyzer:
             print(f"❌ Ошибка прогноза результата: {e}")
             return {}
 
-    # СУЩЕСТВУЮЩИЕ МЕТОДЫ АНАЛИЗА (без изменений)
+    # МЕТОДЫ АНАЛИЗА 
     async def get_players_analysis(self, team1_id: int, team2_id: int, team1_name: str, team2_name: str, 
                               tournament_id: int, season_id: int):
         """Анализ только ключевых игроков"""
