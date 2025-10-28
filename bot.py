@@ -1,6 +1,7 @@
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from football_match_forecast import AdvancedFootballAnalyzer
+from players_analyzer import PlayersAnalyzer
 import io
 import sys
 import os
@@ -221,6 +222,7 @@ SUB_CATEGORIES = {
     "players": {
         "⭐ Весь раздел 'Игроки'": "players_all",
         "👥 Ключевые игроки": "players_key",
+        "📊 Форма игроков": "players_compact",
         "🔙 Назад к разделам": "back_to_main"
     }
 }
@@ -310,7 +312,53 @@ async def continue_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     return SELECT_MAIN_CATEGORY
-
+async def get_players_compact_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Анализ формы игроков в компактном формате"""
+    try:
+        # Получаем данные из контекста
+        league = context.user_data['league']
+        home_team = context.user_data['home_team']
+        away_team = context.user_data['away_team']
+        home_team_id = context.user_data['home_team_id']
+        away_team_id = context.user_data['away_team_id']
+        season_id = context.user_data['season_id']
+        
+        await update.message.reply_text("⏳ Анализирую форму игроков...")
+        
+        async with PlayersAnalyzer() as analyzer:
+            # Получаем дашборды для обеих команд
+            home_dashboard = await analyzer.get_team_compact_dashboard(
+                team_id=home_team_id,
+                team_name=home_team,
+                season_id=season_id
+            )
+            
+            away_dashboard = await analyzer.get_team_compact_dashboard(
+                team_id=away_team_id, 
+                team_name=away_team,
+                season_id=season_id
+            )
+            
+            # Форматируем вывод
+            home_output = analyzer.format_compact_dashboard(home_dashboard)
+            away_output = analyzer.format_compact_dashboard(away_dashboard)
+            
+            # Собираем полный отчет
+            full_output = (
+                f"🏆 ЛИГА: {league}\n"
+                f"🏟️ АНАЛИЗ ФОРМЫ ИГРОКОВ:\n"
+                f"{home_team} 🆚 {away_team}\n\n"
+                f"{home_output}\n"
+                f"{'='*50}\n"
+                f"{away_output}"
+            )
+            
+            await update.message.reply_text(full_output)
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка анализа игроков: {str(e)}")
+    
+    return await show_main_menu(update, context)
 async def change_league(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Смена лиги"""
     if update.message.text == "❌ Завершить":
@@ -551,6 +599,10 @@ async def select_sub_category(update: Update, context: ContextTypes.DEFAULT_TYPE
     if data_type == "back_to_main":
         return await handle_back_navigation(update, context)
     
+    # Обработка компактного анализа игроков
+    if data_type == "players_compact":
+        return await get_players_compact_analysis(update, context)
+    
     return await get_analysis(update, context, data_type)
 
 async def get_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE, data_type: str = None):
@@ -577,8 +629,49 @@ async def get_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE, data_
         sys.stdout = new_stdout
         
         try:
+            # Если выбран полный отчет - добавляем анализ игроков
+            if data_type == "all" or data_type == "full_report":
+                # Сначала стандартный анализ
+                async with AdvancedFootballAnalyzer() as analyzer:
+                    await analyzer.get_match_analysis(
+                        team1_id=home_team_id,
+                        team2_id=away_team_id,
+                        team1_name=home_team,
+                        team2_name=away_team,
+                        tournament_id=tournament_id,
+                        season_id=season_id
+                    )
+                
+                # Затем добавляем анализ игроков
+                async with PlayersAnalyzer() as players_analyzer:
+                    home_dashboard = await players_analyzer.get_team_compact_dashboard(
+                        team_id=home_team_id,
+                        team_name=home_team,
+                        season_id=season_id
+                    )
+                    away_dashboard = await players_analyzer.get_team_compact_dashboard(
+                        team_id=away_team_id,
+                        team_name=away_team, 
+                        season_id=season_id
+                    )
+                    
+                    players_output = (
+                        f"\n{'='*60}\n"
+                        f"⭐ ДЕТАЛЬНЫЙ АНАЛИЗ ФОРМЫ ИГРОКОВ:\n"
+                        f"{'='*60}\n"
+                        f"{players_analyzer.format_compact_dashboard(home_dashboard)}\n"
+                        f"{'='*50}\n"
+                        f"{players_analyzer.format_compact_dashboard(away_dashboard)}\n"
+                    )
+                    
+                    # Добавляем к основному выводу
+                    current_output = new_stdout.getvalue()
+                    full_output = current_output + players_output
+                    new_stdout = io.StringIO()
+                    new_stdout.write(full_output)
+            
             # Если выбран только раздел игроков - используем специальный метод
-            if data_type in ["players_all", "players_key"]:
+            elif data_type in ["players_all", "players_key"]:
                 async with AdvancedFootballAnalyzer() as analyzer:
                     await analyzer.get_players_analysis(
                         team1_id=home_team_id,
@@ -588,6 +681,7 @@ async def get_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE, data_
                         tournament_id=tournament_id,
                         season_id=season_id
                     )
+            
             else:
                 # Полный анализ для остальных случаев
                 async with AdvancedFootballAnalyzer() as analyzer:
@@ -755,8 +849,11 @@ def filter_output(output: str, data_type: str) -> str:
         "players_key": {
             "sections": ["⭐ АНАЛИЗ ПРОГРЕССА КЛЮЧЕВЫХ ИГРОКОВ", "🔑 КЛЮЧЕВЫЕ ИГРОКИ"]
         },
+        "players_compact": {
+            "sections": ["⭐ ДЕТАЛЬНЫЙ АНАЛИЗ ФОРМЫ ИГРОКОВ", "🛡️ КОМАНДА:", "⚽ НАПАДАЮЩИЕ", "🎯 ПОЛУЗАЩИТНИКИ", "🛡️ ЗАЩИТНИКИ", "🥅 ВРАТАРИ"]
+        },
         "players_all": {
-            "sections": ["⭐ АНАЛИЗ ПРОГРЕССА КЛЮЧЕВЫХ ИГРОКОВ", "🔑 КЛЮЧЕВЫЕ ИГРОКИ"]
+            "sections": ["⭐ АНАЛИЗ ПРОГРЕССА КЛЮЧЕВЫХ ИГРОКОВ", "🔑 КЛЮЧЕВЫЕ ИГРОКИ", "⭐ ДЕТАЛЬНЫЙ АНАЛИЗ ФОРМЫ ИГРОКОВ", "🛡️ КОМАНДА:"]
         }
     }
     
