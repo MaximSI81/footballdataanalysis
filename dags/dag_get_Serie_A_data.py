@@ -38,6 +38,6 @@ with DAG(
 
     bash_task = BashOperator(
         task_id='run_my_script',
-        bash_command="cd /opt/airflow/dags/scripts && python running_script.py --round {{ var.value.get('football_current_round_Serie_A') }} --tournament 23 --season 76457"
+        bash_command="cd /opt/airflow/dags/scripts && python running_script.py --round {{ var.value.get('football_current_round_Serie_A') }} --tournament 23 --season 76457 --historical --cache"
     )
     get_round_task >> bash_task

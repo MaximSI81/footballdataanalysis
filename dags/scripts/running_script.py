@@ -651,7 +651,7 @@ def check_database_state(host, user, password, database):
 
 async def main():
     parser = argparse.ArgumentParser(description='Football Data Orchestrator')
-    parser.add_argument('--round', type=int, required=False, help='Round number to process (historical data)')
+    parser.add_argument('--round', type=int, required=False, help='Round number to process')
     parser.add_argument('--tournament', required=True, type=int, help='ID турнира')
     parser.add_argument('--season', required=True, type=int, help='ID сезона')
     parser.add_argument('--host', default=os.getenv('CLICKHOUSE_HOST', 'clickhouse-server'), help='ClickHouse host')
@@ -659,6 +659,12 @@ async def main():
     parser.add_argument('--password', default=os.getenv('CLICKHOUSE_PASSWORD', ''), help='ClickHouse password')
     parser.add_argument('--database', default=os.getenv('CLICKHOUSE_DB', 'football_db'), help='ClickHouse database name')
     parser.add_argument('--port', type=int, default=os.getenv('CLICKHOUSE_PORT', 9000), help='ClickHouse port')
+    
+    # Новые аргументы для выбора операций
+    parser.add_argument('--historical', action='store_true', help='Обработать исторические данные тура')
+    parser.add_argument('--fixtures', action='store_true', help='Загрузить fixtures для следующего тура')
+    parser.add_argument('--cache', action='store_true', help='Обновить кэш-таблицы')
+    parser.add_argument('--all', action='store_true', help='Выполнить все операции (historical + fixtures + cache)')
         
     args = parser.parse_args()
         
@@ -679,25 +685,34 @@ async def main():
     )
         
     try:
-        if args.round:
-            print(f"\n🎯 Начинаем обработку тура {args.round}...")
-            
-            # Обрабатываем исторические данные указанного тура
-            await orchestrator.process_historical_round(args.round)
-            
-            # И автоматически заполняем fixtures следующего тура
-            next_round = args.round + 1
-            print(f"🔮 Подготавливаем fixtures для тура {next_round}...")
-            await orchestrator.process_upcoming_fixtures(next_round)
-            
-            # Обновляем кэш-таблицы
-            print("🔄 Обновляем кэш-таблицы...")
-            await orchestrator.update_cache_tables()
-            
-            print(f"\n🎉 Обработка тура {args.round} завершена!")
-        else:
+        if not args.round:
             print("❌ Укажите --round для обработки данных")
             return
+        
+        # Определяем какие операции выполнять
+        run_historical = args.historical or args.all
+        run_fixtures = args.fixtures or args.all  
+        run_cache = args.cache or args.all
+        
+        print(f"\n🎯 Операции для тура {args.round}:")
+        print(f"   📊 Исторические данные: {'✅' if run_historical else '❌'}")
+        print(f"   🔮 Fixtures: {'✅' if run_fixtures else '❌'}")
+        print(f"   💾 Кэш-таблицы: {'✅' if run_cache else '❌'}")
+        
+        if run_historical:
+            print(f"\n🎯 Обработка исторических данных тура {args.round}...")
+            await orchestrator.process_historical_round(args.round)
+        
+        if run_fixtures:
+            next_round = args.round + 1
+            print(f"\n🔮 Подготовка fixtures для тура {next_round}...")
+            await orchestrator.process_upcoming_fixtures(next_round)
+        
+        if run_cache:
+            print(f"\n🔄 Обновление кэш-таблиц...")
+            await orchestrator.update_cache_tables()
+        
+        print(f"\n🎉 Обработка завершена!")
         
         # Проверяем результат
         print("\n🔍 Проверяем результат после обработки...")
@@ -710,6 +725,7 @@ async def main():
         import traceback
         traceback.print_exc()
         raise
+
 
 if __name__ == "__main__":
     asyncio.run(main())
