@@ -515,15 +515,53 @@ class AdvancedFootballAnalyzer:
                 'season_id': season_id
             })
             
-            if result:
+            if result and result[0][0] is not None and result[0][1] is not None:
                 pos1, pos2 = result[0]
-                return abs(pos1 - pos2) if pos1 and pos2 else 8
-            return 8
+                return abs(pos1 - pos2)
+            
+            # Если данных нет - возвращаем 0 (равные команды)
+            print(f"⚠️ Не удалось получить позиции для команд {team1_id} и {team2_id}")
+            return 0
             
         except Exception as e:
             print(f"❌ Ошибка получения разницы позиций: {e}")
-            return 8
-
+            return 0
+        
+    def get_opponent_yellow_cards_stats(self, team_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает статистику желтых карточек, которые команда провоцирует у соперников"""
+        try:
+            query = """
+            SELECT 
+                COUNT(*) as total_opponent_yellows,
+                COUNT(DISTINCT fc.match_id) as matches_with_opponent_cards,
+                COUNT(*) * 1.0 / COUNT(DISTINCT fc.match_id) as avg_opponent_yellows_per_match
+            FROM football_cards fc
+            JOIN football_matches fm ON fc.match_id = fm.match_id
+            WHERE (fm.home_team_id = %(team_id)s OR fm.away_team_id = %(team_id)s)
+            AND fm.season_id = %(season_id)s
+            AND fm.status = 'Ended'
+            AND fc.card_type = 'yellow'
+            AND fc.team_is_home != CASE 
+                WHEN fm.home_team_id = %(team_id)s THEN 1 
+                ELSE 0 
+            END  -- Карточки у СОПЕРНИКА
+            """
+            
+            result = self.ch_client.execute(query, {'team_id': team_id, 'season_id': season_id})
+            
+            if result and result[0][0] > 0:
+                total_opponent_yellows, matches_with_cards, avg_opponent_yellows = result[0]
+                return {
+                    'total_opponent_yellows': total_opponent_yellows,
+                    'matches_with_opponent_cards': matches_with_cards,
+                    'avg_opponent_yellows': round(avg_opponent_yellows, 2)
+                }
+            return {'total_opponent_yellows': 0, 'matches_with_opponent_cards': 0, 'avg_opponent_yellows': 2.0}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики карточек соперников для команды {team_id}: {e}")
+        return {'total_opponent_yellows': 0, 'matches_with_opponent_cards': 0, 'avg_opponent_yellows': 2.0}
+    
     def _is_derby(self, team1_id: int, team2_id: int) -> Tuple[bool, str]:
         """Проверяет, является ли матч дерби"""
         derby_key1 = (team1_id, team2_id)
@@ -757,7 +795,76 @@ class AdvancedFootballAnalyzer:
         except Exception as e:
             print(f"❌ Ошибка получения домашних/гостевых показателей: {e}")
             return {'home': {}, 'away': {}}
-
+        
+    def get_team_corners_stats(self, team_id: int, season_id: int) -> Dict[str, Any]:
+        """Получает статистику угловых команды"""
+        try:
+            query = """
+            SELECT 
+                AVG(fms1.corners) as avg_corners_for,
+                AVG(fms2.corners) as avg_corners_against
+            FROM football_match_stats fms1
+            JOIN football_match_stats fms2 ON fms1.match_id = fms2.match_id 
+                AND fms2.team_id != fms1.team_id
+            JOIN football_matches fm ON fms1.match_id = fm.match_id
+            WHERE fms1.team_id = %(team_id)s
+            AND fm.season_id = %(season_id)s
+            AND fm.status = 'Ended'
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team_id': team_id,
+                'season_id': season_id
+            })
+            
+            if result and result[0][0] is not None:
+                avg_corners_for, avg_corners_against = result[0]
+                return {
+                    'avg_corners_for': round(avg_corners_for or 0, 1),
+                    'avg_corners_against': round(avg_corners_against or 0, 1),
+                    'corners_balance': round((avg_corners_for or 0) - (avg_corners_against or 0), 1)
+                }
+            return {'avg_corners_for': 0, 'avg_corners_against': 0, 'corners_balance': 0}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики угловых для команды {team_id}: {e}")
+            return {'avg_corners_for': 0, 'avg_corners_against': 0, 'corners_balance': 0}
+    def get_team_corners_stats_by_venue(self, team_id: int, season_id: int, venue: str) -> Dict[str, Any]:
+        """Получает статистику угловых с учетом домашних/гостевых"""
+        try:
+            query = """
+            SELECT 
+                AVG(fms1.corners) as avg_corners_for,
+                AVG(fms2.corners) as avg_corners_against
+            FROM football_match_stats fms1
+            JOIN football_match_stats fms2 ON fms1.match_id = fms2.match_id 
+                AND fms2.team_id != fms1.team_id
+            JOIN football_matches fm ON fms1.match_id = fm.match_id
+            WHERE fms1.team_id = %(team_id)s
+            AND fms1.team_type = %(venue)s  -- 'home' или 'away'
+            AND fm.season_id = %(season_id)s
+            AND fm.status = 'Ended'
+            """
+            
+            result = self.ch_client.execute(query, {
+                'team_id': team_id,
+                'venue': venue,
+                'season_id': season_id
+            })
+        
+            if result and result[0][0] is not None:
+                    avg_corners_for, avg_corners_against = result[0]
+                    return {
+                        'avg_corners_for': round(avg_corners_for or 0, 1),
+                        'avg_corners_against': round(avg_corners_against or 0, 1),
+                        'corners_balance': round((avg_corners_for or 0) - (avg_corners_against or 0), 1)
+                    }
+            return {'avg_corners_for': 0, 'avg_corners_against': 0, 'corners_balance': 0}
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения статистики угловых для команды {team_id}: {e}")
+            return {'avg_corners_for': 0, 'avg_corners_against': 0, 'corners_balance': 0}
+        
     def predict_match_result_with_home_away(self, team1_id: int, team2_id: int, 
                                           team1_name: str, team2_name: str,
                                           tournament_id: int, season_id: int) -> Dict[str, Any]:
@@ -980,14 +1087,71 @@ class AdvancedFootballAnalyzer:
             print(f"\n🛡️ ОБОРОНА:")
             print(f"   {team1_name}: {team1_goals_conceded_pm:.1f} пропущенных за матч")
             print(f"   {team2_name}: {team2_goals_conceded_pm:.1f} пропущенных за матч")
+            # УГЛОВЫЕ
+            print(f"\n🎯 СТАТИСТИКА УГЛОВЫХ:")
+            team1_corners_stats = self.get_team_corners_stats(team1_id, season_id)
+            team2_corners_stats = self.get_team_corners_stats(team2_id, season_id)
+            team1_corners_stats = self.get_team_corners_stats_by_venue(team1_id, season_id, 'home')  # Хозяева
+            team2_corners_stats = self.get_team_corners_stats_by_venue(team2_id, season_id, 'away')  # Гости
 
+            
+            print(f"   {team1_name} (общие):")
+            print(f"      • Атака: {team1_corners_stats['avg_corners_for']} угловых за матч")
+            print(f"      • Оборона: {team1_corners_stats['avg_corners_against']} пропускает")
+            print(f"      • Баланс: {team1_corners_stats['corners_balance']:+.1f}")
+
+            print(f"   {team2_name} (общие):")
+            print(f"      • Атака: {team2_corners_stats['avg_corners_for']} угловых за матч") 
+            print(f"      • Оборона: {team2_corners_stats['avg_corners_against']} пропускает")
+            print(f"      • Баланс: {team2_corners_stats['corners_balance']:+.1f}")
+
+            print(f"   {team1_name} (дома):")
+            print(f"      • Атака: {team1_corners_stats['avg_corners_for']} угловых за матч")
+            print(f"      • Оборона: {team1_corners_stats['avg_corners_against']} пропускает")
+            print(f"      • Баланс: {team1_corners_stats['corners_balance']:+.1f}")
+
+            print(f"   {team2_name} (в гостях):")
+            print(f"      • Атака: {team2_corners_stats['avg_corners_for']} угловых за матч")
+            print(f"      • Оборона: {team2_corners_stats['avg_corners_against']} пропускает")
+            print(f"      • Баланс: {team2_corners_stats['corners_balance']:+.1f}")
+
+
+            # Анализ прессинга
+            total_corners = team1_corners_stats['avg_corners_for'] + team2_corners_stats['avg_corners_for']
+            print(f"\n📊 ОЖИДАЕМАЯ АКТИВНОСТЬ:")
+            print(f"   • Всего угловых за матч: {total_corners:.1f}")
+            print(f"   • Интенсивность атаки: {'🔴 Высокая' if total_corners > 10 else '🟡 Средняя' if total_corners > 7 else '🟢 Низкая'}")
             # АГРЕССИВНОСТЬ
             print(f"\n🟨 АГРЕССИВНОСТЬ:")
             team1_fouls_pm = self.safe_divide(team1_stats.get('fouls', 0), team1_matches)
             team2_fouls_pm = self.safe_divide(team2_stats.get('fouls', 0), team2_matches)
 
+            # ДОБАВЛЯЕМ ЖЕЛТЫЕ КАРТОЧКИ ИЗ СУЩЕСТВУЮЩИХ МЕТОДОВ
+            team1_yellow_stats = self._get_team_yellow_stats(team1_id, season_id)
+            team2_yellow_stats = self._get_team_yellow_stats(team2_id, season_id)
+
+            # ДОБАВЛЯЕМ КАРТОЧКИ СОПЕРНИКОВ
+            team1_opponent_yellow_stats = self.get_opponent_yellow_cards_stats(team1_id, season_id)
+            team2_opponent_yellow_stats = self.get_opponent_yellow_cards_stats(team2_id, season_id)
+
             print(f"   {team1_name}: {team1_fouls_pm:.1f} фолов за матч")
             print(f"   {team2_name}: {team2_fouls_pm:.1f} фолов за матч")
+
+            print(f"\n🟨 ЖЕЛТЫЕ КАРТОЧКИ:")
+            print(f"   {team1_name}: {team1_yellow_stats['avg_yellows']} в среднем за матч")
+            print(f"   {team2_name}: {team2_yellow_stats['avg_yellows']} в среднем за матч")
+
+            print(f"\n🟨 КАРТОЧКИ У СОПЕРНИКОВ:")
+            print(f"   Против {team1_name}: {team1_opponent_yellow_stats['avg_opponent_yellows']} в среднем за матч")
+            print(f"   Против {team2_name}: {team2_opponent_yellow_stats['avg_opponent_yellows']} в среднем за матч")
+
+            # Анализ агрессивности
+            print(f"\n📊 АНАЛИЗ АГРЕССИВНОСТИ:")
+            team1_total_yellows = team1_yellow_stats['avg_yellows'] + team1_opponent_yellow_stats['avg_opponent_yellows']
+            team2_total_yellows = team2_yellow_stats['avg_yellows'] + team2_opponent_yellow_stats['avg_opponent_yellows']
+
+            print(f"   Всего карточек в матчах {team1_name}: {team1_total_yellows:.1f} за матч")
+            print(f"   Всего карточек в матчах {team2_name}: {team2_total_yellows:.1f} за матч")
 
             # КАЧЕСТВО МОМЕНТОВ
             team1_big_chances_pm = self.safe_divide(team1_stats.get('bigChances', 0), team1_matches)
