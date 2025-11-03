@@ -5,8 +5,6 @@ import asyncio
 from typing import Dict, Any, List, Tuple
 from datetime import datetime, timedelta
 
-
-
 class PlayersAnalyzer:
     def __init__(self):
         self.ch_client = None
@@ -105,7 +103,7 @@ class PlayersAnalyzer:
             return []
     
     async def _calculate_player_trend(self, player_id: int, season_id: int) -> Dict:
-        """Упрощенный расчет тренда"""
+        """Исправленный расчет тренда со стрелками"""
         try:
             query = """
             SELECT rating, match_date
@@ -113,7 +111,7 @@ class PlayersAnalyzer:
             JOIN football_matches fm ON fps.match_id = fm.match_id
             WHERE fps.player_id = %(player_id)s 
             AND fm.season_id = %(season_id)s
-            AND fps.minutes_played > 0
+            AND fps.minutes_played > 45
             ORDER BY fm.match_date DESC
             LIMIT 5
             """
@@ -121,33 +119,35 @@ class PlayersAnalyzer:
             results = self.ch_client.execute(query, {'player_id': player_id, 'season_id': season_id})
             
             if len(results) < 3:
-                return {'percent': 0, 'direction': 'stable', 'icon': '🟡'}
+                return {'percent': 0, 'direction': 'stable', 'icon': '➡️'}
             
-            # Берем последние 3 матча и предыдущие 2
-            recent_matches = [row[0] for row in results[:3]]
-            older_matches = [row[0] for row in results[3:5]]
+            # Сравниваем последние 2 матча vs предыдущие 3 матча
+            recent_matches = [row[0] for row in results[:2]]  # 2 самых свежих
+            older_matches = [row[0] for row in results[2:5]]  # 3 предыдущих
             
-            if not recent_matches:
-                return {'percent': 0, 'direction': 'stable', 'icon': '🟡'}
+            if len(recent_matches) < 2 or len(older_matches) < 2:
+                return {'percent': 0, 'direction': 'stable', 'icon': '➡️'}
             
             recent_avg = sum(recent_matches) / len(recent_matches)
+            older_avg = sum(older_matches) / len(older_matches)
             
-            if older_matches:
-                older_avg = sum(older_matches) / len(older_matches)
-                trend_percent = ((recent_avg - older_avg) / older_avg) * 100 if older_avg > 0 else 0
-            else:
-                # Если нет старых матчей для сравнения
-                trend_percent = 0
+            # Защита от некорректных значений
+            if older_avg < 5.0:
+                return {'percent': 0, 'direction': 'stable', 'icon': '➡️'}
             
-            # Пороги тренда
-            if trend_percent > 8:
-                icon = '🟢'
+            trend_percent = ((recent_avg - older_avg) / older_avg) * 100
+            
+            # Ограничение и классификация со стрелками
+            trend_percent = max(-50, min(50, trend_percent))
+            
+            if trend_percent > 10:
+                icon = '📈'
                 direction = 'up'
-            elif trend_percent < -8:
-                icon = '🔴' 
+            elif trend_percent < -10:
+                icon = '📉' 
                 direction = 'down'
             else:
-                icon = '🟡'
+                icon = '➡️'
                 direction = 'stable'
             
             return {
@@ -157,8 +157,8 @@ class PlayersAnalyzer:
             }
             
         except Exception as e:
-            print(f"❌ Ошибка упрощенного расчета тренда: {e}")
-            return {'percent': 0, 'direction': 'stable', 'icon': '🟡'}
+            print(f"❌ Ошибка расчета тренда для игрока {player_id}: {e}")
+            return {'percent': 0, 'direction': 'stable', 'icon': '➡️'}
     
     def _group_players_by_position(self, players: List[Dict]) -> Dict[str, List]:
         """Группирует игроков по позициям"""
@@ -188,25 +188,26 @@ class PlayersAnalyzer:
         return positions
     
     def _calculate_overall_form(self, players: List[Dict]) -> Dict:
-        """Рассчитывает общую форму команды"""
+        """Рассчитывает общую форму команды со стрелками"""
         if not players:
-            return {'rating': 0, 'trend': 'stable', 'icon': '🟡'}
+            return {'rating': 0, 'trend_icon': '➡️', 'trend_text': '0%'}
         
         total_rating = sum(p['rating'] for p in players)
         avg_rating = total_rating / len(players)
         
-        # Анализ тренда команды (по среднему тренду игроков)
+        # Анализ тренда команды
         trends = [p['form_trend']['percent'] for p in players if p.get('form_trend')]
         avg_trend = sum(trends) / len(trends) if trends else 0
         
+        # Используем стрелки вместо цветных кружков
         if avg_trend > 3:
-            trend_icon = '🟢'
+            trend_icon = '📈'
             trend_text = f"+{abs(avg_trend):.0f}%"
         elif avg_trend < -3:
-            trend_icon = '🔴' 
+            trend_icon = '📉'
             trend_text = f"-{abs(avg_trend):.0f}%"
         else:
-            trend_icon = '🟡'
+            trend_icon = '➡️'
             trend_text = f"{avg_trend:+.0f}%"
         
         return {
@@ -216,7 +217,7 @@ class PlayersAnalyzer:
         }
     
     def format_compact_dashboard(self, team_data: Dict) -> str:
-        """Форматирует данные в компактный дашборд"""
+        """Форматирует данные в читаемый дашборд со стрелками тренда"""
         if not team_data:
             return "❌ Данные недоступны"
         
@@ -226,47 +227,47 @@ class PlayersAnalyzer:
         positions = team_data['positions']
         
         # Заголовок команды
-        output.append(f"🛡️ КОМАНДА: {team_name.upper()}")
-        output.append(f"Общая форма: {overall['trend_icon']} {overall['rating']}/10 ({overall['trend_text']})")
+        output.append(f"🏷️ {team_name.upper()}")
+        output.append(f"Общий рейтинг: {overall['rating']}/10 ({overall['trend_text']})")
         output.append("")
         
-        # Позиции
-        position_icons = {
-            'forwards': '⚽',
-            'midfielders': '🎯', 
-            'defenders': '🛡️',
-            'goalkeepers': '🥅'
+        # Позиции с улучшенным форматированием
+        position_config = {
+            'forwards': {'icon': '⚽', 'name': 'НАПАДАЮЩИЕ'},
+            'midfielders': {'icon': '🎯', 'name': 'ПОЛУЗАЩИТНИКИ'}, 
+            'defenders': {'icon': '🛡️', 'name': 'ЗАЩИТНИКИ'},
+            'goalkeepers': {'icon': '🥅', 'name': 'ВРАТАРИ'}
         }
         
-        position_names = {
-            'forwards': 'НАПАДАЮЩИЕ',
-            'midfielders': 'ПОЛУЗАЩИТНИКИ',
-            'defenders': 'ЗАЩИТНИКИ', 
-            'goalkeepers': 'ВРАТАРИ'
-        }
-        
-        for pos_key in ['forwards', 'midfielders', 'defenders', 'goalkeepers']:
+        for pos_key, config in position_config.items():
             players = positions.get(pos_key, [])
             if players:
                 # Расчет средней оценки для позиции
                 pos_rating = sum(p['rating'] for p in players) / len(players)
                 
-                output.append(f"{position_icons[pos_key]} {position_names[pos_key]} ({pos_rating:.1f}/10)")
+                output.append(f"{config['icon']} {config['name']} ({pos_rating:.1f}/10)")
+                output.append("-" * 45)
                 
-                for player in players:
+                for player in players[:8]:  # Ограничиваем до 8 игроков на позицию
                     trend = player['form_trend']
+                    trend_emoji = trend['icon']  # 📈, 📉, ➡️
                     
                     # Форматирование в зависимости от позиции
                     if pos_key == 'goalkeepers':
-                        line = f"{player['name']:12} ⭐ {player['rating']} {trend['icon']} {trend['percent']:+.0f}% | {player['saves']} сейв | {player['pass_accuracy']}%пас"
+                        line = (f"  {player['name']:<18} ⭐{player['rating']} "
+                               f"({trend['percent']:+.0f}%) {trend_emoji} | "
+                               f"{player['saves']} сейв | {player['pass_accuracy']}%пас")
                     elif pos_key == 'defenders':
-                        line = f"{player['name']:12} ⭐ {player['rating']} {trend['icon']} {trend['percent']:+.0f}% | {player['duel_success']}%ЕБ | {player['shots']} отб"
+                        line = (f"  {player['name']:<18} ⭐{player['rating']} "
+                               f"({trend['percent']:+.0f}%) {trend_emoji} | "
+                               f"{player['duel_success']}%ЕБ | {player['shots']} отб")
                     else:
-                        line = f"{player['name']:12} ⭐ {player['rating']} {trend['icon']} {trend['percent']:+.0f}% | {player['goals']}г+{player['assists']}п | {player['shots']} уд"
+                        line = (f"  {player['name']:<18} ⭐{player['rating']} "
+                               f"({trend['percent']:+.0f}%) {trend_emoji} | "
+                               f"{player['goals']}г+{player['assists']}п | {player['shots']} уд")
                     
                     output.append(line)
                 
                 output.append("")
         
         return "\n".join(output)
-    

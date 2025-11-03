@@ -909,38 +909,6 @@ class AdvancedFootballAnalyzer:
             print(f"❌ Ошибка прогноза результата: {e}")
             return {}
 
-    # МЕТОДЫ АНАЛИЗА 
-    async def get_players_analysis(self, team1_id: int, team2_id: int, team1_name: str, team2_name: str, 
-                              tournament_id: int, season_id: int):
-        """Анализ только ключевых игроков"""
-        print(f"⭐ АНАЛИЗ ПРОГРЕССА КЛЮЧЕВЫХ ИГРОКОВ:")
-        print("=" * 50)
-        
-        try:
-            team1_key_players = self.get_key_players_progress(team1_id, season_id)
-            team2_key_players = self.get_key_players_progress(team2_id, season_id)
-
-            print(f"\n🔑 {team1_name} - ключевые игроки:")
-            if team1_key_players:
-                for player in team1_key_players[:3]:
-                    trend_icon = "📈" if player['trend'] == 'up' else "📉" if player['trend'] == 'down' else "➡️"
-                    print(f"   • {player['name']} ({player['position']}) {trend_icon}")
-                    print(f"     Голы: {player['goals']} | Ассисты: {player['assists']} | Удары: {player['shots']}")
-            else:
-                print(f"   • Статистика появится после 3-х сыгранных туров")
-
-            print(f"\n🔑 {team2_name} - ключевые игроки:")
-            if team2_key_players:
-                for player in team2_key_players[:3]:
-                    trend_icon = "📈" if player['trend'] == 'up' else "📉" if player['trend'] == 'down' else "➡️"
-                    print(f"   • {player['name']} ({player['position']}) {trend_icon}")
-                    print(f"     Голы: {player['goals']} | Ассисты: {player['assists']} | Удары: {player['shots']}")
-            else:
-                print(f"   • Статистика появится после 3-х сыгранных туров")
-                
-        except Exception as e:
-            print(f"❌ Ошибка анализа игроков: {e}")
-
     async def get_match_analysis(self, team1_id: int, team2_id: int, team1_name: str, team2_name: str, 
                                tournament_id: int = 203, season_id: int = 77142):
         """Расширенный анализ матча с данными из БД"""
@@ -1255,29 +1223,6 @@ class AdvancedFootballAnalyzer:
                 print(f"   • {team2_name}: {h2h_all_time['team2_avg_goals']:.1f} голов")
                 print(f"   • Всего голов за матч: {h2h_all_time['team1_avg_goals'] + h2h_all_time['team2_avg_goals']:.1f}")
 
-            # КЛЮЧЕВЫЕ ИГРОКИ
-            print(f"\n⭐ АНАЛИЗ ПРОГРЕССА КЛЮЧЕВЫХ ИГРОКОВ:")
-            team1_key_players = self.get_key_players_progress(team1_id, season_id)
-            team2_key_players = self.get_key_players_progress(team2_id, season_id)
-
-            print(f"\n🔑 {team1_name} - ключевые игроки:")
-            if team1_key_players:
-                for player in team1_key_players[:3]:
-                    trend_icon = "📈" if player['trend'] == 'up' else "📉" if player['trend'] == 'down' else "➡️"
-                    print(f"   • {player['name']} ({player['position']}) {trend_icon}")
-                    print(f"     Голы: {player['goals']} | Ассисты: {player['assists']} | Удары: {player['shots']}")
-            else:
-                print(f"   • Статистика появится после 3-х сыгранных туров")
-
-            print(f"\n🔑 {team2_name} - ключевые игроки:")
-            if team2_key_players:
-                for player in team2_key_players[:3]:
-                    trend_icon = "📈" if player['trend'] == 'up' else "📉" if player['trend'] == 'down' else "➡️"
-                    print(f"   • {player['name']} ({player['position']}) {trend_icon}")
-                    print(f"     Голы: {player['goals']} | Ассисты: {player['assists']} | Удары: {player['shots']}")
-            else:
-                print(f"   • Статистика появится после 3-х сыгранных туров")
-
             # СУЩЕСТВУЮЩИЕ ПРОГНОЗЫ
             total_goals = team1_goals_pm + team2_goals_pm
             
@@ -1469,94 +1414,6 @@ class AdvancedFootballAnalyzer:
             print(f"❌ Ошибка получения статистики встреч: {e}")
             return {}
 
-    def get_key_players_progress(self, team_id: int, season_id: int) -> List[Dict]:
-        """Получает данные по ключевым игрокам с анализом прогресса"""
-        try:
-            query = """
-            WITH player_totals AS (
-                SELECT 
-                    player_id,
-                    player_name,
-                    position,
-                    COUNT(*) as matches_played,
-                    SUM(goals) as total_goals,
-                    SUM(goal_assist) as total_assists,
-                    SUM(total_shot) as total_shots,
-                    SUM(key_pass) as total_key_passes,
-                    AVG(rating) as avg_rating
-                FROM football_player_stats fps
-                JOIN football_matches fm ON fps.match_id = fm.match_id
-                WHERE fps.team_id = %(team_id)s 
-                AND fm.season_id = %(season_id)s
-                AND fps.minutes_played > 45
-                GROUP BY player_id, player_name, position
-                HAVING COUNT(*) >= 3
-            ),
-            player_recent AS (
-                SELECT 
-                    player_id,
-                    AVG(rating) as recent_rating,
-                    SUM(goals) as recent_goals,
-                    SUM(goal_assist) as recent_assists
-                FROM football_player_stats fps
-                JOIN football_matches fm ON fps.match_id = fm.match_id
-                WHERE fps.team_id = %(team_id)s 
-                AND fm.season_id = %(season_id)s
-                AND fps.minutes_played > 45
-                AND fm.match_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                GROUP BY player_id
-            )
-            SELECT 
-                pt.player_id,
-                pt.player_name,
-                pt.position,
-                pt.matches_played,
-                pt.total_goals,
-                pt.total_assists,
-                pt.total_shots,
-                pt.avg_rating,
-                COALESCE(pr.recent_rating, 0) as recent_rating,
-                COALESCE(pr.recent_goals, 0) as recent_goals,
-                COALESCE(pr.recent_assists, 0) as recent_assists
-            FROM player_totals pt
-            LEFT JOIN player_recent pr ON pt.player_id = pr.player_id
-            WHERE pt.total_goals + pt.total_assists > 0
-            OR pt.avg_rating > 7.0
-            ORDER BY (pt.total_goals + pt.total_assists) DESC, pt.avg_rating DESC
-            LIMIT 5
-            """
-            
-            results = self.ch_client.execute(query, {'team_id': team_id, 'season_id': season_id})
-            key_players = []
-            
-            for row in results:
-                player_id, name, position, matches, goals, assists, shots, avg_rating, recent_rating, recent_goals, recent_assists = row
-                
-                if recent_rating > avg_rating + 0.3:
-                    trend = 'up'
-                elif recent_rating < avg_rating - 0.3:
-                    trend = 'down' 
-                else:
-                    trend = 'stable'
-                
-                key_players.append({
-                    'id': player_id,
-                    'name': name,
-                    'position': position,
-                    'matches': matches,
-                    'goals': goals,
-                    'assists': assists,
-                    'shots': shots,
-                    'avg_rating': avg_rating,
-                    'recent_rating': recent_rating,
-                    'trend': trend
-                })
-            
-            return key_players
-            
-        except Exception as e:
-            print(f"❌ Ошибка получения ключевых игроков: {e}")
-            return []
 
     def generate_insights(self, team1_name: str, team2_name: str, team1_stats: Dict, team2_stats: Dict,
                      team1_pos: str, team2_pos: str, team1_matches: int, team2_matches: int,
